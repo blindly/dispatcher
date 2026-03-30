@@ -1,0 +1,95 @@
+package display
+
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/blindly/dispatcher/internal/config"
+	"github.com/blindly/dispatcher/internal/db"
+)
+
+func FormatInterval(seconds int) string {
+	switch {
+	case seconds >= 604800:
+		return fmt.Sprintf("%dw", seconds/604800)
+	case seconds >= 86400:
+		return fmt.Sprintf("%dd", seconds/86400)
+	case seconds >= 3600:
+		return fmt.Sprintf("%dh", seconds/3600)
+	default:
+		return fmt.Sprintf("%dm", seconds/60)
+	}
+}
+
+func FormatDt(iso string) string {
+	if iso == "" {
+		return "-"
+	}
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		if len(iso) >= 19 {
+			return iso[:19]
+		}
+		return iso
+	}
+	return t.Format("2006-01-02 15:04")
+}
+
+func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
+	now := db.NowUTC()
+
+	rows, err := conn.Query("SELECT name, last_run_at, next_run_at, last_status, last_duration_s, run_count, fail_count FROM cron_jobs ORDER BY next_run_at")
+	if err != nil {
+		fmt.Printf("Error querying jobs: %v\n", err)
+		return
+	}
+	defer rows.Close()
+
+	fmt.Printf("\n%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5s  %5s\n",
+		"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails")
+	fmt.Println(strings.Repeat("-", 140))
+
+	for rows.Next() {
+		var name string
+		var lastRun, nextRun, status sql.NullString
+		var duration sql.NullFloat64
+		var runCount, failCount int
+
+		rows.Scan(&name, &lastRun, &nextRun, &status, &duration, &runCount, &failCount)
+
+		job, ok := jobs[name]
+		if !ok {
+			continue
+		}
+
+		interval := FormatInterval(job.IntervalSeconds)
+		lr := "-"
+		if lastRun.Valid {
+			lr = FormatDt(lastRun.String)
+		}
+		nr := FormatDt(nextRun.String)
+		st := "-"
+		if status.Valid {
+			st = status.String
+		}
+
+		isDue := ""
+		if nextRun.Valid && nextRun.String <= now.Format(time.RFC3339) {
+			isDue = "YES"
+		}
+
+		active := "always"
+		if job.ActiveHours != nil {
+			active = fmt.Sprintf("%02d-%02d", job.ActiveHours[0], job.ActiveHours[1])
+			if !db.IsInActiveHours(job.ActiveHours, tzName) {
+				isDue = ""
+			}
+		}
+
+		fmt.Printf("%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5d  %5d\n",
+			name, interval, active, lr, st, nr, isDue, runCount, failCount)
+	}
+	fmt.Println()
+}
