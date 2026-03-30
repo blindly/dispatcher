@@ -225,3 +225,46 @@ jobs:
 		t.Errorf("retry_delay = %d, want 5", job.RetryDelay)
 	}
 }
+
+func TestLoad_CustomTimeout(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+    timeout: 2m
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["j1"]
+	if job.Timeout != 120 {
+		t.Errorf("timeout = %d, want 120", job.Timeout)
+	}
+}
+
+func TestLoad_DefaultTimeout(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["j1"]
+	if job.Timeout != 600 {
+		t.Errorf("timeout = %d, want 600", job.Timeout)
+	}
+}

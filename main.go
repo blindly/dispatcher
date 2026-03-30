@@ -31,6 +31,8 @@ Commands:
   run-once     Run a job without DB tracking
   run-all      Force-run all jobs
   reset        Reset a job's next_run to now
+  validate     Check config syntax
+  logs         Show recent log output for a job
   install      Install crontab entry
   uninstall    Remove crontab entry
   update       Self-update to latest release
@@ -176,6 +178,47 @@ func main() {
 	}
 	if cmd == "uninstall" {
 		uninstallCron(configDir)
+		return
+	}
+
+	if cmd == "validate" {
+		fmt.Printf("Config OK: %s (%d jobs)\n", configPath, len(cfg.Jobs))
+		for name, job := range cfg.Jobs {
+			issues := validateJob(name, job, cfg.Jobs)
+			for _, issue := range issues {
+				fmt.Printf("  WARNING: %s\n", issue)
+			}
+		}
+		return
+	}
+
+	if cmd == "logs" {
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: dispatch logs <job>")
+			os.Exit(1)
+		}
+		jobName := args[0]
+		if _, ok := cfg.Jobs[jobName]; !ok {
+			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", jobName)
+			os.Exit(1)
+		}
+		logPath := filepath.Join(configDir, "logs", jobName+".log")
+		content, err := os.ReadFile(logPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Printf("No logs found for %s\n", jobName)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "Error reading log: %v\n", err)
+			os.Exit(1)
+		}
+		// Show last 50 lines
+		lines := strings.Split(string(content), "\n")
+		start := 0
+		if len(lines) > 50 {
+			start = len(lines) - 50
+		}
+		fmt.Print(strings.Join(lines[start:], "\n"))
 		return
 	}
 
@@ -380,6 +423,24 @@ func installCron(schedule string, projectDir string) {
 
 func selfUpdate(targetVersion string) error {
 	return updater.Update(version, targetVersion)
+}
+
+func validateJob(name string, job *config.JobConfig, allJobs map[string]*config.JobConfig) []string {
+	var issues []string
+	if job.Command == "" {
+		issues = append(issues, fmt.Sprintf("%s: empty command", name))
+	}
+	if job.DependsOn != "" {
+		if _, ok := allJobs[job.DependsOn]; !ok {
+			issues = append(issues, fmt.Sprintf("%s: depends_on %q not found", name, job.DependsOn))
+		}
+	}
+	if job.ActiveHours != nil {
+		if job.ActiveHours[0] < 0 || job.ActiveHours[0] > 23 || job.ActiveHours[1] < 0 || job.ActiveHours[1] > 23 {
+			issues = append(issues, fmt.Sprintf("%s: active_hours values must be 0-23", name))
+		}
+	}
+	return issues
 }
 
 func uninstallCron(projectDir string) {

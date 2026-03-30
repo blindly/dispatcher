@@ -165,6 +165,56 @@ func TestCLI_InitAlreadyExists(t *testing.T) {
 	}
 }
 
+func TestCLI_Validate(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "validate").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Config OK") {
+		t.Errorf("validate output missing 'Config OK': %s", out)
+	}
+}
+
+func TestCLI_ValidateBadDep(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfg := `
+jobs:
+  broken:
+    command: echo hi
+    interval: 5m
+    depends_on: nonexistent
+`
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(cfg), 0644)
+
+	out, err := exec.Command(binary, "--config", path, "validate").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "WARNING") {
+		t.Errorf("expected WARNING for bad dependency: %s", out)
+	}
+}
+
+func TestCLI_LogsNoFile(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "logs", "echo_test").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "No logs found") {
+		t.Errorf("expected 'No logs found': %s", out)
+	}
+}
+
 func TestCLI_DetectsYml(t *testing.T) {
 	binary := buildBinary(t)
 	dir := t.TempDir()

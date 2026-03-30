@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -30,11 +31,20 @@ func RunOnce(job *config.JobConfig) (int, string) {
 	if len(parts) == 0 {
 		return -2, "empty command"
 	}
-	cmd := exec.Command(parts[0], parts[1:]...)
+	timeout := job.Timeout
+	if timeout <= 0 {
+		timeout = 600
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	cmd.Env = os.Environ()
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return -1, fmt.Sprintf("TIMEOUT after %ds", timeout)
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode(), string(out)
 		}
