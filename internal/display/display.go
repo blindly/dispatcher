@@ -3,6 +3,7 @@ package display
 import (
 	"database/sql"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -37,7 +38,21 @@ func FormatDt(iso string) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
+// IsCronInstalled checks if a crontab entry exists for the given project directory.
+func IsCronInstalled(projectDir string) (bool, string) {
+	out, err := exec.Command("crontab", "-l").Output()
+	if err != nil {
+		return false, ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, projectDir) {
+			return true, strings.TrimSpace(line)
+		}
+	}
+	return false, ""
+}
+
+func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string) {
 	now := db.NowUTC()
 
 	var totalJobs, dueCount, totalRuns, totalFails int
@@ -96,8 +111,14 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		}
 	}
 
+	cronStatus := "not installed"
+	if installed, schedule := IsCronInstalled(projectDir); installed {
+		cronStatus = "installed (" + schedule + ")"
+	}
+
 	fmt.Printf("Last run: %s | %d jobs | %d due | %d total runs | %d failures\n",
 		lastRunStr, totalJobs, dueCount, totalRuns, totalFails)
+	fmt.Printf("Cron: %s\n", cronStatus)
 }
 
 func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {

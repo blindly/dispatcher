@@ -60,5 +60,5 @@ func TestPrintQuickStatus(t *testing.T) {
 	db.EnsureJobs(conn, jobs)
 
 	// Should print without error
-	PrintQuickStatus(conn, jobs, "America/New_York")
+	PrintQuickStatus(conn, jobs, "America/New_York", t.TempDir())
 }

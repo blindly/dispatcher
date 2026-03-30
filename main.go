@@ -223,7 +223,7 @@ func main() {
 	}
 
 	if cmd == "status" {
-		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone)
+		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir)
 		return
 	}
 
