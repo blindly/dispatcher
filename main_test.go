@@ -122,3 +122,71 @@ func TestCLI_Version(t *testing.T) {
 		t.Errorf("version output missing 'dispatch': %s", out)
 	}
 }
+
+func TestCLI_Init(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+
+	cmd := exec.Command(binary, "init")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Created dispatcher.yaml") {
+		t.Errorf("unexpected output: %s", out)
+	}
+
+	// Verify file exists
+	content, err := os.ReadFile(filepath.Join(dir, "dispatcher.yaml"))
+	if err != nil {
+		t.Fatal("dispatcher.yaml not created")
+	}
+	if !strings.Contains(string(content), "timezone") {
+		t.Error("config missing timezone")
+	}
+	if !strings.Contains(string(content), "jobs:") {
+		t.Error("config missing jobs section")
+	}
+}
+
+func TestCLI_InitAlreadyExists(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+
+	// Create existing config
+	os.WriteFile(filepath.Join(dir, "dispatcher.yaml"), []byte("existing"), 0644)
+
+	cmd := exec.Command(binary, "init")
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		t.Error("expected error when config already exists")
+	}
+}
+
+func TestCLI_DetectsYml(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+
+	// Create a .yml config (not .yaml)
+	cfg := `
+timezone: America/New_York
+jobs:
+  yml_test:
+    command: echo yml
+    interval: 5m
+`
+	os.WriteFile(filepath.Join(dir, "dispatcher.yml"), []byte(cfg), 0644)
+
+	// Should auto-detect dispatcher.yml without --config
+	cmd := exec.Command(binary, "list")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "yml_test") {
+		t.Errorf("list output missing yml_test (auto-detect failed): %s", out)
+	}
+}

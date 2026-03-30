@@ -24,6 +24,7 @@ const usage = `Usage: dispatch [command] [options]
 
 Commands:
   (default)    Run due jobs
+  init         Create a default dispatcher.yaml
   list         Show job status table
   status       Quick summary (last run, due count)
   run          Force-run a specific job
@@ -39,19 +40,77 @@ Options:
   --config     Config file path (default: dispatcher.yaml)
 `
 
+func detectConfig() string {
+	candidates := []string{
+		"dispatcher.yaml",
+		"dispatcher.yml",
+		"Dispatcher.yaml",
+		"Dispatcher.yml",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return "dispatcher.yaml" // default if none found
+}
+
+func initConfig() {
+	// Check if any config already exists
+	candidates := []string{
+		"dispatcher.yaml",
+		"dispatcher.yml",
+		"Dispatcher.yaml",
+		"Dispatcher.yml",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			fmt.Fprintf(os.Stderr, "Config already exists: %s\n", c)
+			os.Exit(1)
+		}
+	}
+
+	defaultConfig := `timezone: America/New_York
+
+# notify:
+#   discord:
+#     webhook: ${DISCORD_WEBHOOK_URL}
+
+jobs:
+  hello:
+    command: echo "Hello from dispatcher"
+    interval: 5m
+    description: Example job
+    # active_hours: [9, 17]
+    # depends_on: other_job
+    # retries: 2
+    # retry_delay: 5s
+`
+	if err := os.WriteFile("dispatcher.yaml", []byte(defaultConfig), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create config: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Created dispatcher.yaml")
+}
+
 func main() {
 	args := os.Args[1:]
-	configPath := "dispatcher.yaml"
+	configPath := ""
 
 	// Extract --config flag from anywhere in args
+	configExplicit := false
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--config" && i+1 < len(args) {
 			configPath = args[i+1]
+			configExplicit = true
 			i++
 			continue
 		}
 		filtered = append(filtered, args[i])
+	}
+	if !configExplicit {
+		configPath = detectConfig()
 	}
 	args = filtered
 
@@ -80,6 +139,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
 			os.Exit(1)
 		}
+		return
+	}
+
+	if cmd == "init" {
+		initConfig()
 		return
 	}
 
