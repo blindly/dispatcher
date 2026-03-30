@@ -33,6 +33,7 @@ type DispatcherConfig struct {
 	Timezone string       `yaml:"timezone"`
 	Notify   NotifyConfig `yaml:"notify"`
 	Jobs     map[string]*JobConfig
+	DbPath   string       `yaml:"db_path"`
 }
 
 // rawJob is the intermediate YAML structure before parsing.
@@ -47,9 +48,11 @@ type rawJob struct {
 }
 
 type rawConfig struct {
-	Timezone string            `yaml:"timezone"`
-	Notify   NotifyConfig      `yaml:"notify"`
-	Jobs     map[string]rawJob `yaml:"jobs"`
+	Timezone      string            `yaml:"timezone"`
+	Notify        NotifyConfig      `yaml:"notify"`
+	Jobs          map[string]rawJob `yaml:"jobs"`
+	DbPath        string            `yaml:"db_path"`
+	DiscordWebhook string           `yaml:"discord_webhook"`
 }
 
 var intervalRe = regexp.MustCompile(`^(\d+)([smhdw])$`)
@@ -90,6 +93,11 @@ func Load(path string) (*DispatcherConfig, error) {
 		Timezone: raw.Timezone,
 		Notify:   raw.Notify,
 		Jobs:     make(map[string]*JobConfig),
+		DbPath:   raw.DbPath,
+	}
+
+	if cfg.Notify.Discord.Webhook == "" && raw.DiscordWebhook != "" {
+		cfg.Notify.Discord.Webhook = raw.DiscordWebhook
 	}
 
 	if cfg.Timezone == "" {

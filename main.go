@@ -22,6 +22,7 @@ const usage = `Usage: dispatch [command] [options]
 Commands:
   (default)    Run due jobs
   list         Show job status table
+  status       Quick summary (last run, due count)
   run          Force-run a specific job
   run-once     Run a job without DB tracking
   run-all      Force-run all jobs
@@ -114,6 +115,12 @@ func main() {
 	}
 
 	dbPath := filepath.Join(configDir, "data.db")
+	if cfg.DbPath != "" {
+		dbPath = cfg.DbPath
+		if !filepath.IsAbs(dbPath) {
+			dbPath = filepath.Join(configDir, dbPath)
+		}
+	}
 	conn, err := db.Open(dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
@@ -126,6 +133,11 @@ func main() {
 	// Read-only: no lock needed
 	if cmd == "list" {
 		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone)
+		return
+	}
+
+	if cmd == "status" {
+		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone)
 		return
 	}
 

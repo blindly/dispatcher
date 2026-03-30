@@ -157,6 +157,48 @@ jobs:
 	}
 }
 
+func TestLoad_DbPath(t *testing.T) {
+	yaml := `
+db_path: custom/data.db
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DbPath != "custom/data.db" {
+		t.Errorf("db_path = %q, want custom/data.db", cfg.DbPath)
+	}
+}
+
+func TestLoad_LegacyDiscordWebhook(t *testing.T) {
+	yaml := `
+discord_webhook: https://discord.com/old-style
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Notify.Discord.Webhook != "https://discord.com/old-style" {
+		t.Errorf("webhook = %q, want old-style URL", cfg.Notify.Discord.Webhook)
+	}
+}
+
 func TestLoad_Defaults(t *testing.T) {
 	yaml := `
 jobs:

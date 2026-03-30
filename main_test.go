@@ -97,3 +97,17 @@ func TestCLI_UnknownCommand(t *testing.T) {
 		t.Error("expected error for unknown command")
 	}
 }
+
+func TestCLI_Status(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "status").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "jobs") {
+		t.Errorf("status output missing 'jobs': %s", out)
+	}
+}

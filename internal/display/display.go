@@ -37,6 +37,69 @@ func FormatDt(iso string) string {
 	return t.Format("2006-01-02 15:04")
 }
 
+func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
+	now := db.NowUTC()
+
+	var totalJobs, dueCount, totalRuns, totalFails int
+	var lastRunAt sql.NullString
+
+	totalJobs = len(jobs)
+
+	rows, err := conn.Query("SELECT name, next_run_at, last_run_at, run_count, fail_count FROM cron_jobs ORDER BY last_run_at DESC")
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	defer rows.Close()
+
+	first := true
+	for rows.Next() {
+		var name, nextRun string
+		var lr sql.NullString
+		var runs, fails int
+		rows.Scan(&name, &nextRun, &lr, &runs, &fails)
+
+		job, ok := jobs[name]
+		if !ok {
+			continue
+		}
+
+		if first && lr.Valid {
+			lastRunAt = lr
+			first = false
+		}
+
+		totalRuns += runs
+		totalFails += fails
+
+		if nextRun <= now.Format(time.RFC3339) {
+			if db.IsInActiveHours(job.ActiveHours, tzName) {
+				dueCount++
+			}
+		}
+	}
+
+	lastRunStr := "never"
+	if lastRunAt.Valid {
+		t, err := time.Parse(time.RFC3339, lastRunAt.String)
+		if err == nil {
+			ago := now.Sub(t)
+			if ago < time.Minute {
+				lastRunStr = fmt.Sprintf("%ds ago", int(ago.Seconds()))
+			} else if ago < time.Hour {
+				lastRunStr = fmt.Sprintf("%dm ago", int(ago.Minutes()))
+			} else if ago < 24*time.Hour {
+				lastRunStr = fmt.Sprintf("%dh ago", int(ago.Hours()))
+			} else {
+				lastRunStr = fmt.Sprintf("%dd ago", int(ago.Hours()/24))
+			}
+		}
+	}
+
+	fmt.Printf("Last run: %s | %d jobs | %d due | %d total runs | %d failures\n",
+		lastRunStr, totalJobs, dueCount, totalRuns, totalFails)
+}
+
 func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
 	now := db.NowUTC()
 

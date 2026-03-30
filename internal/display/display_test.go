@@ -1,6 +1,12 @@
 package display
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/blindly/dispatcher/internal/config"
+	"github.com/blindly/dispatcher/internal/db"
+)
 
 func TestFormatInterval_Minutes(t *testing.T) {
 	if got := FormatInterval(300); got != "5m" {
@@ -37,4 +43,22 @@ func TestFormatDt_Empty(t *testing.T) {
 	if got := FormatDt(""); got != "-" {
 		t.Errorf("got %q, want -", got)
 	}
+}
+
+func TestPrintQuickStatus(t *testing.T) {
+	// Just verify it doesn't panic with an empty DB
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	jobs := map[string]*config.JobConfig{
+		"j1": {Name: "j1", Command: "echo", IntervalSeconds: 300},
+	}
+	db.EnsureJobs(conn, jobs)
+
+	// Should print without error
+	PrintQuickStatus(conn, jobs, "America/New_York")
 }
