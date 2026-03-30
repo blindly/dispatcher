@@ -15,7 +15,10 @@ import (
 	"github.com/blindly/dispatcher/internal/display"
 	"github.com/blindly/dispatcher/internal/notify"
 	"github.com/blindly/dispatcher/internal/runner"
+	"github.com/blindly/dispatcher/internal/updater"
 )
+
+var version = "dev"
 
 const usage = `Usage: dispatch [command] [options]
 
@@ -29,6 +32,8 @@ Commands:
   reset        Reset a job's next_run to now
   install      Install crontab entry
   uninstall    Remove crontab entry
+  update       Self-update to latest release
+  version      Show current version
 
 Options:
   --config     Config file path (default: dispatcher.yaml)
@@ -59,6 +64,23 @@ func main() {
 	if cmd == "-h" || cmd == "--help" || cmd == "help" {
 		fmt.Print(usage)
 		os.Exit(0)
+	}
+
+	if cmd == "version" {
+		fmt.Printf("dispatch %s\n", version)
+		os.Exit(0)
+	}
+
+	if cmd == "update" {
+		targetVersion := ""
+		if len(args) > 0 {
+			targetVersion = args[0]
+		}
+		if err := selfUpdate(targetVersion); err != nil {
+			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -290,6 +312,10 @@ func installCron(schedule string, projectDir string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Cron installed: %s\n", cronLine)
+}
+
+func selfUpdate(targetVersion string) error {
+	return updater.Update(version, targetVersion)
 }
 
 func uninstallCron(projectDir string) {

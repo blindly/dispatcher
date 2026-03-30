@@ -111,3 +111,14 @@ func TestCLI_Status(t *testing.T) {
 		t.Errorf("status output missing 'jobs': %s", out)
 	}
 }
+
+func TestCLI_Version(t *testing.T) {
+	binary := buildBinary(t)
+	out, err := exec.Command(binary, "version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v", err)
+	}
+	if !strings.Contains(string(out), "dispatch") {
+		t.Errorf("version output missing 'dispatch': %s", out)
+	}
+}

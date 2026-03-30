@@ -32,7 +32,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          go build -ldflags="-s -w" -o dist/dispatch-${{ matrix.goos }}-${{ matrix.goarch }} .
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dist/dispatch-${{ matrix.goos }}-${{ matrix.goarch }} .
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
