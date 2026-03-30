@@ -1,0 +1,17 @@
+timezone: America/New_York
+
+notify:
+  discord:
+    webhook: ${DISCORD_WEBHOOK_URL}
+
+jobs:
+  hello:
+    command: echo "Hello from dispatcher"
+    interval: 5m
+    description: Test job
+
+  world:
+    command: echo "World"
+    interval: 10m
+    description: Depends on hello
+    depends_on: hello
