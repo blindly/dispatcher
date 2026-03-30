@@ -1,0 +1,4 @@
+dispatch
+data.db
+logs/
+.dispatch.lock
