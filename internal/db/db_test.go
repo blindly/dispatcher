@@ -202,3 +202,51 @@ func TestGetAnalytics_Empty(t *testing.T) {
 		t.Errorf("got %d results, want 0", len(results))
 	}
 }
+
+func TestGetHistory(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	now := NowUTC().Format(time.RFC3339)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "hist_test", now)
+
+	UpdateAfterRun(conn, "hist_test", 300, 0, 1.0, "ok")
+	UpdateAfterRun(conn, "hist_test", 300, 1, 2.0, "failed:1")
+	UpdateAfterRun(conn, "hist_test", 300, 0, 1.5, "ok")
+
+	entries, err := GetHistory(conn, "hist_test", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	// Most recent first
+	if entries[0].Status != "ok" {
+		t.Errorf("first entry status = %q, want ok", entries[0].Status)
+	}
+	if entries[1].Status != "failed:1" {
+		t.Errorf("second entry status = %q, want failed:1", entries[1].Status)
+	}
+}
+
+func TestGetHistory_Empty(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	entries, err := GetHistory(conn, "nonexistent", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("got %d entries, want 0", len(entries))
+	}
+}

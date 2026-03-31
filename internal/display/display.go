@@ -274,3 +274,26 @@ func PrintAnalytics(conn *sql.DB) {
 	}
 	fmt.Println()
 }
+
+func PrintHistory(conn *sql.DB, name string, limit int) {
+	entries, err := db.GetHistory(conn, name, limit)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	if len(entries) == 0 {
+		fmt.Printf("No history for %s\n", name)
+		return
+	}
+
+	fmt.Printf("\n%s — last %d runs\n", name, len(entries))
+	fmt.Printf("%-19s  %12s  %6s  %10s\n", "Run At", "Status", "Exit", "Duration")
+	fmt.Println(strings.Repeat("-", 55))
+
+	for _, e := range entries {
+		runAt := FormatDt(e.RunAt)
+		fmt.Printf("%-19s  %12s  %6d  %9.1fs\n", runAt, e.Status, e.ExitCode, e.Duration)
+	}
+	fmt.Println()
+}

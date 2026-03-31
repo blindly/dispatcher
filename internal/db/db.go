@@ -199,3 +199,30 @@ func GetAnalytics(db *sql.DB) ([]JobAnalytics, error) {
 
 	return result, nil
 }
+
+type HistoryEntry struct {
+	RunAt    string
+	Status   string
+	ExitCode int
+	Duration float64
+}
+
+func GetHistory(db *sql.DB, name string, limit int) ([]HistoryEntry, error) {
+	rows, err := db.Query(
+		`SELECT run_at, status, exit_code, duration_s FROM job_runs
+		 WHERE name = ? ORDER BY run_at DESC LIMIT ?`,
+		name, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []HistoryEntry
+	for rows.Next() {
+		var e HistoryEntry
+		rows.Scan(&e.RunAt, &e.Status, &e.ExitCode, &e.Duration)
+		entries = append(entries, e)
+	}
+	return entries, nil
+}

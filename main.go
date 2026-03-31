@@ -29,6 +29,7 @@ Commands:
   list         Show job status table
   status       Quick summary (last run, due count)
   analytics    Job success rates and run history
+  history      Show last 20 runs for a job
   run          Force-run a specific job
   run-once     Run a job without DB tracking
   run-all      Force-run all jobs
@@ -278,6 +279,19 @@ func main() {
 
 	if cmd == "analytics" {
 		display.PrintAnalytics(conn)
+		return
+	}
+
+	if cmd == "history" {
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: dispatch history <job>")
+			os.Exit(1)
+		}
+		if _, ok := cfg.Jobs[args[0]]; !ok {
+			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
+			os.Exit(1)
+		}
+		display.PrintHistory(conn, args[0], 20)
 		return
 	}
 
