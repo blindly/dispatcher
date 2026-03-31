@@ -127,16 +127,16 @@ jobs:
     command: "{{.PYTHON}} scripts/fetch.py --output {{.DATA_DIR}}"
     interval: 30m
 
-  calibrate:
-    command: "{{.PYTHON}} scripts/calibrate.py {{.CLI_ARGS}}"
+  report:
+    command: "{{.PYTHON}} scripts/report.py {{.CLI_ARGS}}"
     adhoc: true
 ```
 
 `{{.CLI_ARGS}}` is a special built-in that expands to the extra arguments passed after `--`:
 
 ```bash
-dispatch run calibrate -- weather crypto --parallel
-# runs: /usr/bin/python3 scripts/calibrate.py weather crypto --parallel
+dispatch run report -- --format pdf --output /tmp/report.pdf
+# runs: /usr/bin/python3 scripts/report.py --format pdf --output /tmp/report.pdf
 ```
 
 Variables are expanded at config load time (except `{{.CLI_ARGS}}` which is expanded at runtime). Use `${ENV_VAR}` for secrets from the environment, `{{.VAR}}` for config-level values.
