@@ -69,6 +69,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 
 	var totalJobs, dueCount, runningCount, totalRuns, totalFails int
 	var lastRunAt sql.NullString
+	var runningStart, runningName string
 
 	totalJobs = len(jobs)
 
@@ -98,6 +99,11 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 
 		if runningSince.Valid {
 			runningCount++
+			// Track earliest running job for "running since" display
+			if runningStart == "" || runningSince.String < runningStart {
+				runningStart = runningSince.String
+				runningName = name
+			}
 		}
 
 		totalRuns += runs
@@ -135,7 +141,18 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 	statusLine := fmt.Sprintf("Last run: %s | %d jobs | %d due | %d total runs | %d failures",
 		lastRunStr, totalJobs, dueCount, totalRuns, totalFails)
 	if runningCount > 0 {
-		statusLine += fmt.Sprintf(" | %d running", runningCount)
+		runningInfo := fmt.Sprintf("%d running", runningCount)
+		if runningStart != "" {
+			if t, err := time.Parse(time.RFC3339, runningStart); err == nil {
+				ago := now.Sub(t)
+				if runningCount == 1 {
+					runningInfo = fmt.Sprintf("%s running (%dm)", runningName, int(ago.Minutes()))
+				} else {
+					runningInfo = fmt.Sprintf("%d running (started %dm ago)", runningCount, int(ago.Minutes()))
+				}
+			}
+		}
+		statusLine += " | " + runningInfo
 	}
 	fmt.Println(statusLine)
 	fmt.Printf("Cron: %s\n", cronStatus)
