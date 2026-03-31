@@ -36,6 +36,7 @@ Commands:
   reset        Reset a job's next_run to now
   validate     Check config syntax
   logs         Show recent log output for a job
+  watch        Live tail of job logs (all or specific job)
   install      Install crontab entry
   uninstall    Remove crontab entry
   update       Self-update to latest release
@@ -231,6 +232,19 @@ func main() {
 			start = len(lines) - 50
 		}
 		fmt.Print(strings.Join(lines[start:], "\n"))
+		return
+	}
+
+	if cmd == "watch" {
+		jobName := ""
+		if len(args) > 0 {
+			jobName = args[0]
+			if _, ok := cfg.Jobs[jobName]; !ok {
+				fmt.Fprintf(os.Stderr, "Unknown job: %s\n", jobName)
+				os.Exit(1)
+			}
+		}
+		watchLogs(configDir, jobName, cfg.Jobs)
 		return
 	}
 
@@ -455,6 +469,71 @@ func showDocs() {
 		os.Exit(1)
 	}
 	fmt.Print(string(body))
+}
+
+func watchLogs(configDir string, jobName string, jobs map[string]*config.JobConfig) {
+	logDir := filepath.Join(configDir, "logs")
+
+	// Determine which log files to watch
+	var logFiles []string
+	if jobName != "" {
+		logFiles = []string{filepath.Join(logDir, jobName+".log")}
+	} else {
+		for name := range jobs {
+			logFiles = append(logFiles, filepath.Join(logDir, name+".log"))
+		}
+	}
+
+	// Track file sizes
+	offsets := make(map[string]int64)
+	for _, f := range logFiles {
+		info, err := os.Stat(f)
+		if err == nil {
+			// Start from end of file
+			offsets[f] = info.Size()
+		}
+	}
+
+	if jobName != "" {
+		fmt.Printf("Watching %s (ctrl+c to stop)\n\n", jobName)
+	} else {
+		fmt.Printf("Watching %d jobs (ctrl+c to stop)\n\n", len(jobs))
+	}
+
+	for {
+		for _, f := range logFiles {
+			info, err := os.Stat(f)
+			if err != nil {
+				continue
+			}
+
+			offset, seen := offsets[f]
+			if !seen {
+				// New file appeared
+				offset = 0
+				offsets[f] = 0
+			}
+
+			if info.Size() <= offset {
+				continue
+			}
+
+			file, err := os.Open(f)
+			if err != nil {
+				continue
+			}
+			file.Seek(offset, 0)
+			buf := make([]byte, info.Size()-offset)
+			n, _ := file.Read(buf)
+			file.Close()
+
+			if n > 0 {
+				fmt.Print(string(buf[:n]))
+			}
+			offsets[f] = info.Size()
+		}
+		time.Sleep(1 * time.Second)
+	}
 }
 
 // parseJobArgs splits args after the job name into env vars (KEY=VALUE) and extra args (after --).
