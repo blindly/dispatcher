@@ -28,6 +28,7 @@ Commands:
   init         Create a default dispatcher.yaml
   list         Show job status table
   status       Quick summary (last run, due count)
+  analytics    Job success rates and run history
   run          Force-run a specific job
   run-once     Run a job without DB tracking
   run-all      Force-run all jobs
@@ -272,6 +273,11 @@ func main() {
 	// Read-only: no lock needed
 	if cmd == "list" {
 		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone)
+		return
+	}
+
+	if cmd == "analytics" {
+		display.PrintAnalytics(conn)
 		return
 	}
 

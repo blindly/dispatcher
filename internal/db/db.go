@@ -18,7 +18,18 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     last_duration_s REAL,
     run_count     INTEGER DEFAULT 0,
     fail_count    INTEGER DEFAULT 0
-);`
+);
+
+CREATE TABLE IF NOT EXISTS job_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    run_at      TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    exit_code   INTEGER,
+    duration_s  REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_runs_name_run_at ON job_runs(name, run_at);`
 
 func Open(dbPath string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dbPath)
@@ -101,4 +112,90 @@ func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapse
 		 WHERE name = ?`,
 		now.Format(time.RFC3339), nextRun, status, elapsed, failInc, name,
 	)
+	db.Exec(
+		`INSERT INTO job_runs (name, run_at, status, exit_code, duration_s) VALUES (?, ?, ?, ?, ?)`,
+		name, now.Format(time.RFC3339), status, rc, elapsed,
+	)
+}
+
+type JobAnalytics struct {
+	Name        string
+	TotalRuns   int
+	PassCount   int
+	FailCount   int
+	SuccessRate float64
+	AvgDuration float64
+	Last7dRuns  int
+	Last7dPass  int
+}
+
+func GetAnalytics(db *sql.DB) ([]JobAnalytics, error) {
+	sevenDaysAgo := NowUTC().AddDate(0, 0, -7).Format(time.RFC3339)
+
+	rows, err := db.Query(`
+		SELECT
+			name,
+			COUNT(*) as total,
+			SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) as pass,
+			SUM(CASE WHEN exit_code != 0 THEN 1 ELSE 0 END) as fail,
+			AVG(duration_s) as avg_dur
+		FROM job_runs
+		GROUP BY name
+		ORDER BY name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	analytics := make(map[string]*JobAnalytics)
+	var result []JobAnalytics
+
+	for rows.Next() {
+		var a JobAnalytics
+		var avgDur sql.NullFloat64
+		rows.Scan(&a.Name, &a.TotalRuns, &a.PassCount, &a.FailCount, &avgDur)
+		if avgDur.Valid {
+			a.AvgDuration = avgDur.Float64
+		}
+		if a.TotalRuns > 0 {
+			a.SuccessRate = float64(a.PassCount) / float64(a.TotalRuns) * 100
+		}
+		analytics[a.Name] = &a
+		result = append(result, a)
+	}
+
+	// Get last 7 days stats
+	rows7d, err := db.Query(`
+		SELECT
+			name,
+			COUNT(*) as total,
+			SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) as pass
+		FROM job_runs
+		WHERE run_at >= ?
+		GROUP BY name
+	`, sevenDaysAgo)
+	if err != nil {
+		return result, nil
+	}
+	defer rows7d.Close()
+
+	for rows7d.Next() {
+		var name string
+		var total, pass int
+		rows7d.Scan(&name, &total, &pass)
+		if a, ok := analytics[name]; ok {
+			a.Last7dRuns = total
+			a.Last7dPass = pass
+			// Update in result slice
+			for i := range result {
+				if result[i].Name == name {
+					result[i].Last7dRuns = total
+					result[i].Last7dPass = pass
+				}
+			}
+		}
+	}
+
+	return result, nil
 }

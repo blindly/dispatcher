@@ -186,3 +186,62 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 	}
 	fmt.Println()
 }
+
+func PrintAnalytics(conn *sql.DB) {
+	analytics, err := db.GetAnalytics(conn)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	if len(analytics) == 0 {
+		fmt.Println("No run history yet.")
+		return
+	}
+
+	fmt.Printf("\n%-30s  %6s  %6s  %6s  %7s  %10s  %10s\n",
+		"Job", "Runs", "Pass", "Fail", "Rate", "Avg Time", "Last 7d")
+	fmt.Println(strings.Repeat("-", 100))
+
+	var totalRuns, totalPass, totalFail int
+	var bestName, worstName string
+	bestRate, worstRate := -1.0, 101.0
+
+	for _, a := range analytics {
+		last7d := fmt.Sprintf("%d/%d", a.Last7dPass, a.Last7dRuns)
+		if a.Last7dRuns == 0 {
+			last7d = "-"
+		}
+		fmt.Printf("%-30s  %6d  %6d  %6d  %6.1f%%  %9.1fs  %10s\n",
+			a.Name, a.TotalRuns, a.PassCount, a.FailCount,
+			a.SuccessRate, a.AvgDuration, last7d)
+
+		totalRuns += a.TotalRuns
+		totalPass += a.PassCount
+		totalFail += a.FailCount
+
+		if a.SuccessRate > bestRate {
+			bestRate = a.SuccessRate
+			bestName = a.Name
+		}
+		if a.SuccessRate < worstRate {
+			worstRate = a.SuccessRate
+			worstName = a.Name
+		}
+	}
+
+	overallRate := 0.0
+	if totalRuns > 0 {
+		overallRate = float64(totalPass) / float64(totalRuns) * 100
+	}
+
+	fmt.Println()
+	fmt.Printf("Overall: %d runs, %.1f%% success rate, %d jobs\n", totalRuns, overallRate, len(analytics))
+	if bestName != "" {
+		fmt.Printf("Most reliable: %s (%.1f%%)\n", bestName, bestRate)
+	}
+	if worstName != "" && worstName != bestName {
+		fmt.Printf("Least reliable: %s (%.1f%%)\n", worstName, worstRate)
+	}
+	fmt.Println()
+}

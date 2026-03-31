@@ -136,4 +136,69 @@ func TestUpdateAfterRun(t *testing.T) {
 	if status != "ok" {
 		t.Errorf("status = %q, want ok", status)
 	}
+
+	// Verify job_runs history was also inserted
+	var histCount int
+	conn.QueryRow("SELECT COUNT(*) FROM job_runs WHERE name = ?", "test").Scan(&histCount)
+	if histCount != 1 {
+		t.Errorf("job_runs count = %d, want 1", histCount)
+	}
+}
+
+func TestGetAnalytics(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	now := NowUTC().Format(time.RFC3339)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "analytics_test", now)
+
+	// Simulate 3 runs: 2 pass, 1 fail
+	UpdateAfterRun(conn, "analytics_test", 300, 0, 1.0, "ok")
+	UpdateAfterRun(conn, "analytics_test", 300, 0, 2.0, "ok")
+	UpdateAfterRun(conn, "analytics_test", 300, 1, 3.0, "failed:1")
+
+	results, err := GetAnalytics(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	a := results[0]
+	if a.TotalRuns != 3 {
+		t.Errorf("total = %d, want 3", a.TotalRuns)
+	}
+	if a.PassCount != 2 {
+		t.Errorf("pass = %d, want 2", a.PassCount)
+	}
+	if a.FailCount != 1 {
+		t.Errorf("fail = %d, want 1", a.FailCount)
+	}
+	if a.SuccessRate < 66.6 || a.SuccessRate > 66.7 {
+		t.Errorf("rate = %.1f, want ~66.7", a.SuccessRate)
+	}
+	if a.Last7dRuns != 3 {
+		t.Errorf("last7d = %d, want 3", a.Last7dRuns)
+	}
+}
+
+func TestGetAnalytics_Empty(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	results, err := GetAnalytics(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Errorf("got %d results, want 0", len(results))
+	}
 }
