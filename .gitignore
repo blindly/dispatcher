@@ -4,3 +4,5 @@ logs/
 .dispatch.lock
 .env
 CLAUDE.md
+data.db-shm
+data.db-wal
