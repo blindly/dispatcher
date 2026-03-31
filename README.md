@@ -27,15 +27,23 @@ Then dispatch is for you. It's a single binary that wraps your existing scripts 
 
 ## Install
 
-Download a binary from [Releases](https://github.com/blindly/dispatcher/releases) (Linux, macOS, Windows).
-
-Or build from source:
+**Linux/macOS:**
 
 ```bash
-go build -o dispatch .
+curl -sL https://github.com/blindly/dispatcher/releases/latest/download/dispatch-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') -o dispatch
+chmod +x dispatch
+sudo mv dispatch /usr/local/bin/
 ```
 
-Self-update to the latest release:
+**Or with Go:**
+
+```bash
+go install github.com/blindly/dispatcher@latest
+```
+
+**Or download manually** from [Releases](https://github.com/blindly/dispatcher/releases) (Linux, macOS, Windows).
+
+Once installed, keep it up to date:
 
 ```bash
 dispatch update
