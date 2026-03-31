@@ -279,6 +279,25 @@ Least reliable: upload-backup (96.6%)
 
 SQLite state is stored as `data.db` next to the config file. A file lock prevents concurrent dispatch runs. Per-job output is logged to `logs/<name>.log`.
 
+## Windows
+
+Dispatch runs on Windows. Most features work the same, with a few differences:
+
+| Feature | Windows | Linux/macOS |
+|---|---|---|
+| Job execution | Works | Works |
+| SQLite tracking | Works | Works |
+| Discord notifications | Works | Works |
+| File locking | Works (LockFileEx) | Works (flock) |
+| Config, variables, analytics | Works | Works |
+| `dispatch install` / `uninstall` | Not supported (no crontab) | Works |
+
+For scheduled execution on Windows, use Task Scheduler manually:
+
+```
+schtasks /create /tn "dispatch" /tr "C:\path\to\dispatch.exe" /sc minute /mo 5
+```
+
 ## Development
 
 ```bash
