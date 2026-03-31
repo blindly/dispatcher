@@ -149,11 +149,17 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 		}
 
 		interval := FormatInterval(job.IntervalSeconds)
+		if job.Adhoc {
+			interval = "-"
+		}
 		lr := "-"
 		if lastRun.Valid {
 			lr = FormatDt(lastRun.String)
 		}
 		nr := FormatDt(nextRun.String)
+		if job.Adhoc {
+			nr = "-"
+		}
 		st := "-"
 		if status.Valid {
 			st = status.String
