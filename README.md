@@ -200,6 +200,7 @@ dispatch run-once <job>  # run without DB tracking
 dispatch run-all         # force-run all scheduled jobs
 dispatch reset <job>     # reset schedule to run now
 dispatch logs <job>      # show recent job output
+dispatch analytics       # job success rates and run history
 dispatch validate        # check config syntax
 dispatch init            # create default config
 dispatch install         # add crontab entry (default: */5 * * * *)
@@ -222,6 +223,22 @@ dispatch status
 
 # Remove
 dispatch uninstall
+```
+
+## Analytics
+
+Every run is logged to a history table. Use `dispatch analytics` to see success rates and trends:
+
+```
+Job                  Runs    Pass    Fail     Rate    Avg Time     Last 7d
+----------------------------------------------------------------------------------------------------
+fetch_data            142     138       4    97.2%       12.3s      28/28
+process_data          140     135       5    96.4%       45.1s      27/28
+health_check          840     839       1    99.9%        1.2s    168/168
+
+Overall: 1122 runs, 99.1% success rate, 3 jobs
+Most reliable: health_check (99.9%)
+Least reliable: process_data (96.4%)
 ```
 
 ## How it works
