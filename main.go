@@ -329,6 +329,7 @@ func main() {
 func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 	due := db.GetDueJobs(conn, cfg.Jobs, cfg.Timezone)
 	if len(due) == 0 {
+		fmt.Printf("No jobs due (%d jobs configured)\n", len(cfg.Jobs))
 		return
 	}
 
