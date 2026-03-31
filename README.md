@@ -81,7 +81,6 @@ jobs:
       - gzip {{.BACKUP_DIR}}/dump-$(date +%Y%m%d).sql
     interval: 1d
     description: Dump and compress the database
-    active_hours: [2, 5]
     timeout: 10m
 
   upload-backup:
@@ -101,6 +100,7 @@ jobs:
     command: curl -sf https://myapp.com/health
     interval: 5m
     description: Ping the app endpoint
+    active_hours: [6, 22]
     retries: 3
     retry_delay: 10s
     timeout: 30s
@@ -111,7 +111,7 @@ jobs:
     description: Restore a backup (run manually)
 ```
 
-This config sets up a daily backup pipeline: `db-backup` runs overnight, `upload-backup` waits for it to finish, `cleanup-old` runs weekly, and `health-check` pings every 5 minutes. The `restore` job is adhoc -- it only runs when you trigger it manually:
+This config sets up a daily backup pipeline: `db-backup` runs once a day, `upload-backup` waits for it to finish, `cleanup-old` runs weekly, and `health-check` pings every 5 minutes (only between 6am-10pm). The `restore` job is adhoc -- it only runs when you trigger it manually:
 
 ```bash
 dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
