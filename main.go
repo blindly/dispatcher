@@ -82,6 +82,7 @@ jobs:
     command: echo "Hello from dispatcher"
     interval: 5m
     description: Example job
+    # adhoc: true
     # active_hours: [9, 17]
     # depends_on: other_job
     # retries: 2
@@ -313,6 +314,9 @@ func main() {
 	case "run-all":
 		var results []notify.JobResult
 		for name, job := range cfg.Jobs {
+			if job.Adhoc {
+				continue
+			}
 			rc, elapsed, output := runner.RunJob(conn, job)
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output})
 		}

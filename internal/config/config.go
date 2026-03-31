@@ -20,6 +20,7 @@ type JobConfig struct {
 	Retries         int     `yaml:"retries"`
 	RetryDelay      int     `yaml:"-"` // seconds, parsed from retry_delay
 	Timeout         int     `yaml:"-"` // seconds, parsed from timeout
+	Adhoc           bool
 }
 
 type DiscordConfig struct {
@@ -47,6 +48,7 @@ type rawJob struct {
 	Retries     *int   `yaml:"retries"`
 	RetryDelay  string `yaml:"retry_delay"`
 	Timeout     string `yaml:"timeout"`
+	Adhoc       bool   `yaml:"adhoc"`
 }
 
 type rawConfig struct {
@@ -120,6 +122,7 @@ func Load(path string) (*DispatcherConfig, error) {
 			DependsOn:       rj.DependsOn,
 			Retries:         2, // default
 			RetryDelay:      5, // default 5s
+			Adhoc:           rj.Adhoc,
 		}
 
 		if rj.Retries != nil {

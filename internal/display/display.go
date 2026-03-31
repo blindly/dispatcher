@@ -165,7 +165,10 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 		}
 
 		active := "always"
-		if job.ActiveHours != nil {
+		if job.Adhoc {
+			active = "adhoc"
+			isDue = ""
+		} else if job.ActiveHours != nil {
 			active = fmt.Sprintf("%02d-%02d", job.ActiveHours[0], job.ActiveHours[1])
 			if !db.IsInActiveHours(job.ActiveHours, tzName) {
 				isDue = ""

@@ -77,6 +77,9 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 		if !ok {
 			continue
 		}
+		if job.Adhoc {
+			continue
+		}
 		if !IsInActiveHours(job.ActiveHours, tzName) {
 			continue
 		}
