@@ -182,9 +182,9 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 
 	if len(scheduled) > 0 {
 		fmt.Printf("\nScheduled Jobs\n")
-		fmt.Printf("%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5s  %5s\n",
+		fmt.Printf("%-30s  %8s  %10s  %-19s  %15s  %-19s  %4s  %5s  %5s\n",
 			"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails")
-		fmt.Println(strings.Repeat("-", 140))
+		fmt.Println(strings.Repeat("-", 145))
 
 		for _, r := range scheduled {
 			job := jobs[r.name]
@@ -211,7 +211,7 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 					isDue = ""
 				}
 			}
-			fmt.Printf("%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5d  %5d\n",
+			fmt.Printf("%-30s  %8s  %10s  %-19s  %15s  %-19s  %4s  %5d  %5d\n",
 				r.name, interval, active, lr, st, nr, isDue, r.runCount, r.failCount)
 		}
 	}
