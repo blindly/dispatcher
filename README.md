@@ -35,14 +35,20 @@ Or build from source:
 go build -o dispatch .
 ```
 
+Self-update to the latest release:
+
+```bash
+dispatch update
+```
+
 ## Quick start
 
 ```bash
-dispatch init          # creates a dispatcher.yaml with an example job
-dispatch validate      # check config syntax
+dispatch init            # creates a dispatcher.yaml with an example job
+dispatch validate        # check config syntax
 dispatch run-once hello  # test run without tracking
-dispatch install       # set up cron to run every 5 minutes
-dispatch status        # see summary + cron state
+dispatch install         # set up cron to run every 5 minutes
+dispatch status          # see summary + cron state
 ```
 
 ## Configuration
@@ -77,18 +83,64 @@ jobs:
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `command` | yes | | Shell command to execute |
-| `interval` | yes | | Run frequency: `30s`, `5m`, `2h`, `1d`, `1w` |
+| `command` | yes | | Shell command or list of commands |
+| `interval` | yes* | | Run frequency: `30s`, `5m`, `2h`, `1d`, `1w` |
 | `description` | no | | Shown in logs and notifications |
 | `active_hours` | no | | `[start, end]` hours when the job is allowed to run |
 | `depends_on` | no | | Name of another job that must succeed first |
 | `retries` | no | `2` | Number of retry attempts on failure |
 | `retry_delay` | no | `5s` | Delay between retries |
 | `timeout` | no | `600s` | Max time before killing the job |
+| `adhoc` | no | `false` | If true, only runs manually (skipped by scheduler) |
+
+\* `interval` is not required when `adhoc: true`.
 
 Environment variables in the form `${VAR_NAME}` are expanded throughout the config.
 
 Config file auto-detection checks: `dispatcher.yaml`, `dispatcher.yml`, `Dispatcher.yaml`, `Dispatcher.yml`.
+
+### Multiple commands
+
+A job can run a single command or a sequence of commands. Commands run in order and stop on the first failure:
+
+```yaml
+jobs:
+  deploy:
+    command:
+      - git pull
+      - npm install
+      - npm run build
+    interval: 1h
+```
+
+### Adhoc jobs
+
+Jobs marked `adhoc: true` are never run by the scheduler -- they only run when you explicitly trigger them with `dispatch run` or `dispatch run-once`. Useful for manual tasks you want to keep in the config:
+
+```yaml
+jobs:
+  migrate:
+    command: python manage.py migrate
+    adhoc: true
+```
+
+### Passing parameters to jobs
+
+You can pass environment variables and extra arguments when manually running a job:
+
+```bash
+# Environment variables (KEY=VALUE before --)
+dispatch run deploy ENV=production VERSION=1.2.3
+
+# Extra args (after --) appended to the command
+dispatch run backup -- /data/important
+
+# Both
+dispatch run deploy ENV=production -- --force
+
+# Works with run-once too
+dispatch run-once migrate DB_HOST=localhost -- --dry-run
+```
 
 ## Usage
 
@@ -98,9 +150,9 @@ dispatch list            # full job status table
 dispatch status          # quick summary + cron state
 dispatch run <job>       # force-run with DB tracking
 dispatch run-once <job>  # run without DB tracking
-dispatch run-all         # force-run everything
+dispatch run-all         # force-run all scheduled jobs
 dispatch reset <job>     # reset schedule to run now
-dispatch logs <job>      # tail recent job output
+dispatch logs <job>      # show recent job output
 dispatch validate        # check config syntax
 dispatch init            # create default config
 dispatch install         # add crontab entry (default: */5 * * * *)
@@ -128,7 +180,7 @@ dispatch uninstall
 ## How it works
 
 1. Reads `dispatcher.yaml` and checks SQLite for jobs where `next_run_at <= now`.
-2. Due jobs are ordered so dependencies run first.
+2. Due jobs are ordered so dependencies run first. Adhoc jobs are skipped.
 3. Each job runs as a subprocess. Failed jobs retry per their config.
 4. Dependent jobs are skipped if their dependency failed.
 5. After each run, the DB is updated with the result and next scheduled time.
