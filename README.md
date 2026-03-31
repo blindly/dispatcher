@@ -142,6 +142,25 @@ dispatch run deploy ENV=production -- --force
 dispatch run-once migrate DB_HOST=localhost -- --dry-run
 ```
 
+`KEY=VALUE` pairs are set as **environment variables** (`os.environ` in Python, `os.Getenv` in Go). Args after `--` are **appended to the command** (`sys.argv` in Python).
+
+```python
+# scripts/deploy.py
+import argparse, os
+
+# Environment variables (KEY=VALUE)
+api_key = os.environ["API_KEY"]
+
+# Extra args (after --)
+parser = argparse.ArgumentParser()
+parser.add_argument("--env", required=True)
+args = parser.parse_args()
+```
+
+```bash
+dispatch run deploy API_KEY=secret -- --env production
+```
+
 ## Usage
 
 ```bash
