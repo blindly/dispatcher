@@ -233,7 +233,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
 			os.Exit(1)
 		}
-		rc, output := runner.RunOnce(job)
+		extraEnv, extraArgs := parseJobArgs(args[1:])
+		rc, output := runner.RunOnce(job, extraArgs, extraEnv)
 		if strings.TrimSpace(output) != "" {
 			fmt.Print(output)
 		}
@@ -296,7 +297,7 @@ func main() {
 	switch cmd {
 	case "run":
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch run <job>")
+			fmt.Fprintln(os.Stderr, "usage: dispatch run <job> [KEY=VALUE...] [-- args...]")
 			os.Exit(1)
 		}
 		job, ok := cfg.Jobs[args[0]]
@@ -304,7 +305,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
 			os.Exit(1)
 		}
-		rc, elapsed, output := runner.RunJob(conn, job)
+		extraEnv, extraArgs := parseJobArgs(args[1:])
+		rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output}}
 		notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
 		if rc != 0 {
@@ -317,7 +319,7 @@ func main() {
 			if job.Adhoc {
 				continue
 			}
-			rc, elapsed, output := runner.RunJob(conn, job)
+			rc, elapsed, output := runner.RunJob(conn, job, nil, nil)
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output})
 		}
 		notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
@@ -366,7 +368,7 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 				continue
 			}
 		}
-		rc, elapsed, output := runner.RunJob(conn, job)
+		rc, elapsed, output := runner.RunJob(conn, job, nil, nil)
 		results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output})
 	}
 
@@ -383,6 +385,25 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 	fmt.Printf("%s\n  Done: %d ok, %d failed, %.1fs total\n%s\n", sep, passed, failed, totalTime, sep)
 
 	notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+}
+
+// parseJobArgs splits args after the job name into env vars (KEY=VALUE) and extra args (after --).
+func parseJobArgs(args []string) (extraEnv []string, extraArgs []string) {
+	dashDash := false
+	for _, arg := range args {
+		if arg == "--" {
+			dashDash = true
+			continue
+		}
+		if dashDash {
+			extraArgs = append(extraArgs, arg)
+		} else if strings.Contains(arg, "=") {
+			extraEnv = append(extraEnv, arg)
+		} else {
+			extraArgs = append(extraArgs, arg)
+		}
+	}
+	return
 }
 
 // acquireLock and releaseLock are in lock_unix.go / lock_windows.go

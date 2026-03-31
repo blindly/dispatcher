@@ -26,15 +26,16 @@ func writeJobLog(name string, content string) {
 	f.WriteString(content)
 }
 
-func runCommand(command string, timeout int) (int, string) {
+func runCommand(command string, timeout int, extraArgs []string, extraEnv []string) (int, string) {
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return -2, "empty command"
 	}
+	parts = append(parts, extraArgs...)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), extraEnv...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -49,7 +50,7 @@ func runCommand(command string, timeout int) (int, string) {
 	return 0, string(out)
 }
 
-func RunOnce(job *config.JobConfig) (int, string) {
+func RunOnce(job *config.JobConfig, extraArgs []string, extraEnv []string) (int, string) {
 	if len(job.Commands) == 0 {
 		return -2, "empty command"
 	}
@@ -60,7 +61,7 @@ func RunOnce(job *config.JobConfig) (int, string) {
 
 	var allOutput strings.Builder
 	for _, command := range job.Commands {
-		rc, output := runCommand(command, timeout)
+		rc, output := runCommand(command, timeout, extraArgs, extraEnv)
 		allOutput.WriteString(output)
 		if rc != 0 {
 			return rc, allOutput.String()
@@ -69,14 +70,14 @@ func RunOnce(job *config.JobConfig) (int, string) {
 	return 0, allOutput.String()
 }
 
-func RunJob(conn *sql.DB, job *config.JobConfig) (int, float64, string) {
+func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []string) (int, float64, string) {
 	now := db.NowUTC()
 	ts := now.Format("2006-01-02 15:04:05 UTC")
 	header := fmt.Sprintf("[%s] START %s — %s\n", ts, job.Name, job.Description)
 	fmt.Print(header)
 
 	start := time.Now()
-	rc, output := RunOnce(job)
+	rc, output := RunOnce(job, extraArgs, extraEnv)
 
 	attempt := 1
 	for rc != 0 && rc != -1 && attempt <= job.Retries {
@@ -84,7 +85,7 @@ func RunJob(conn *sql.DB, job *config.JobConfig) (int, float64, string) {
 			attempt, job.Retries, job.Name, rc, job.RetryDelay)
 		fmt.Print(retryMsg)
 		time.Sleep(time.Duration(job.RetryDelay) * time.Second)
-		rc, output = RunOnce(job)
+		rc, output = RunOnce(job, extraArgs, extraEnv)
 		attempt++
 	}
 

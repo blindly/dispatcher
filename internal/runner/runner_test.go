@@ -15,7 +15,7 @@ func TestRunOnce_Success(t *testing.T) {
 		Name:    "echo_test",
 		Commands: []string{"echo hello"},
 	}
-	rc, output := RunOnce(job)
+	rc, output := RunOnce(job, nil, nil)
 	if rc != 0 {
 		t.Errorf("rc = %d, want 0", rc)
 	}
@@ -33,7 +33,7 @@ func TestRunOnce_Failure(t *testing.T) {
 		Name:    "fail_test",
 		Commands: []string{cmd},
 	}
-	rc, _ := RunOnce(job)
+	rc, _ := RunOnce(job, nil, nil)
 	if rc == 0 {
 		t.Error("expected non-zero exit code")
 	}
@@ -57,7 +57,7 @@ func TestRunJob_UpdatesDB(t *testing.T) {
 	jobs := map[string]*config.JobConfig{"test_echo": job}
 	db.EnsureJobs(conn, jobs)
 
-	rc, _, output := RunJob(conn, job)
+	rc, _, output := RunJob(conn, job, nil, nil)
 	if rc != 0 {
 		t.Errorf("rc = %d, want 0", rc)
 	}
@@ -81,7 +81,7 @@ func TestRunOnce_MultipleCommands(t *testing.T) {
 		Name:     "multi_test",
 		Commands: []string{"echo hello", "echo world"},
 	}
-	rc, output := RunOnce(job)
+	rc, output := RunOnce(job, nil, nil)
 	if rc != 0 {
 		t.Errorf("rc = %d, want 0", rc)
 	}
@@ -99,12 +99,40 @@ func TestRunOnce_MultipleCommandsStopsOnFailure(t *testing.T) {
 		Name:     "multi_fail_test",
 		Commands: []string{cmd, "echo should-not-run"},
 	}
-	rc, output := RunOnce(job)
+	rc, output := RunOnce(job, nil, nil)
 	if rc == 0 {
 		t.Error("expected non-zero exit code")
 	}
 	if strings.Contains(output, "should-not-run") {
 		t.Error("second command should not have run")
+	}
+}
+
+func TestRunOnce_ExtraArgs(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "args_test",
+		Commands: []string{"echo"},
+	}
+	rc, output := RunOnce(job, []string{"extra", "args"}, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "extra") || !strings.Contains(output, "args") {
+		t.Errorf("output = %q, want to contain extra args", output)
+	}
+}
+
+func TestRunOnce_ExtraEnv(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "env_test",
+		Commands: []string{"env"},
+	}
+	rc, output := RunOnce(job, nil, []string{"MY_TEST_VAR=hello123"})
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "MY_TEST_VAR=hello123") {
+		t.Errorf("output missing env var: %q", output)
 	}
 }
 
