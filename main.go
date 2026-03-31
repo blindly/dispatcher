@@ -86,6 +86,7 @@ jobs:
     interval: 5m
     description: Example job
     # adhoc: true
+    # timeout: 5m
     # active_hours: [9, 17]
     # depends_on: other_job
     # retries: 2

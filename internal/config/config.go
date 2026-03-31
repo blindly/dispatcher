@@ -32,10 +32,11 @@ type NotifyConfig struct {
 }
 
 type DispatcherConfig struct {
-	Timezone string       `yaml:"timezone"`
-	Notify   NotifyConfig `yaml:"notify"`
+	Timezone string            `yaml:"timezone"`
+	Notify   NotifyConfig      `yaml:"notify"`
 	Jobs     map[string]*JobConfig
-	DbPath   string       `yaml:"db_path"`
+	DbPath   string            `yaml:"db_path"`
+	Vars     map[string]string `yaml:"vars"`
 }
 
 // stringOrList handles YAML values that can be either a string or list of strings.
@@ -68,11 +69,12 @@ type rawJob struct {
 }
 
 type rawConfig struct {
-	Timezone      string            `yaml:"timezone"`
-	Notify        NotifyConfig      `yaml:"notify"`
-	Jobs          map[string]rawJob `yaml:"jobs"`
-	DbPath        string            `yaml:"db_path"`
-	DiscordWebhook string           `yaml:"discord_webhook"`
+	Timezone       string            `yaml:"timezone"`
+	Notify         NotifyConfig      `yaml:"notify"`
+	Jobs           map[string]rawJob `yaml:"jobs"`
+	DbPath         string            `yaml:"db_path"`
+	DiscordWebhook string            `yaml:"discord_webhook"`
+	Vars           map[string]string `yaml:"vars"`
 }
 
 var intervalRe = regexp.MustCompile(`^(\d+)([smhdw])$`)
@@ -86,6 +88,14 @@ func ParseInterval(s string) (int, error) {
 	value, _ := strconv.Atoi(m[1])
 	multipliers := map[string]int{"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 	return value * multipliers[m[2]], nil
+}
+
+// ExpandVars replaces {{.KEY}} with values from the vars map.
+func ExpandVars(text string, vars map[string]string) string {
+	for k, v := range vars {
+		text = strings.ReplaceAll(text, "{{."+k+"}}", v)
+	}
+	return text
 }
 
 func ExpandEnv(text string) string {
@@ -109,11 +119,17 @@ func Load(path string) (*DispatcherConfig, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	vars := raw.Vars
+	if vars == nil {
+		vars = make(map[string]string)
+	}
+
 	cfg := &DispatcherConfig{
 		Timezone: raw.Timezone,
 		Notify:   raw.Notify,
 		Jobs:     make(map[string]*JobConfig),
 		DbPath:   raw.DbPath,
+		Vars:     vars,
 	}
 
 	if cfg.Notify.Discord.Webhook == "" && raw.DiscordWebhook != "" {
@@ -136,9 +152,14 @@ func Load(path string) (*DispatcherConfig, error) {
 			return nil, fmt.Errorf("job %q: interval is required (unless adhoc: true)", name)
 		}
 
+		commands := make([]string, len(rj.Command))
+		for i, cmd := range rj.Command {
+			commands[i] = ExpandVars(cmd, vars)
+		}
+
 		job := &JobConfig{
 			Name:            name,
-			Commands:        []string(rj.Command),
+			Commands:        commands,
 			IntervalSeconds: intervalSec,
 			Description:     rj.Description,
 			DependsOn:       rj.DependsOn,

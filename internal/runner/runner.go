@@ -59,12 +59,24 @@ func RunOnce(job *config.JobConfig, extraArgs []string, extraEnv []string) (int,
 		timeout = 600
 	}
 
+	cliArgs := strings.Join(extraArgs, " ")
+
 	var allOutput strings.Builder
 	for _, command := range job.Commands {
-		rc, output := runCommand(command, timeout, extraArgs, extraEnv)
-		allOutput.WriteString(output)
-		if rc != 0 {
-			return rc, allOutput.String()
+		// If command uses {{.CLI_ARGS}}, substitute inline; otherwise append extraArgs
+		if strings.Contains(command, "{{.CLI_ARGS}}") {
+			command = strings.ReplaceAll(command, "{{.CLI_ARGS}}", cliArgs)
+			rc, output := runCommand(command, timeout, nil, extraEnv)
+			allOutput.WriteString(output)
+			if rc != 0 {
+				return rc, allOutput.String()
+			}
+		} else {
+			rc, output := runCommand(command, timeout, extraArgs, extraEnv)
+			allOutput.WriteString(output)
+			if rc != 0 {
+				return rc, allOutput.String()
+			}
 		}
 	}
 	return 0, allOutput.String()

@@ -136,6 +136,34 @@ func TestRunOnce_ExtraEnv(t *testing.T) {
 	}
 }
 
+func TestRunOnce_CLIArgsTemplate(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "cli_args_test",
+		Commands: []string{"echo prefix {{.CLI_ARGS}} suffix"},
+	}
+	rc, output := RunOnce(job, []string{"hello", "world"}, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "prefix hello world suffix") {
+		t.Errorf("output = %q, want 'prefix hello world suffix'", output)
+	}
+}
+
+func TestRunOnce_CLIArgsEmpty(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "cli_args_empty",
+		Commands: []string{"echo before {{.CLI_ARGS}} after"},
+	}
+	rc, output := RunOnce(job, nil, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "before") || !strings.Contains(output, "after") {
+		t.Errorf("output = %q", output)
+	}
+}
+
 func TestResolveOrder_RespectsDependencies(t *testing.T) {
 	jobs := map[string]*config.JobConfig{
 		"fetch": {Name: "fetch", Commands: []string{"echo"}, IntervalSeconds: 300},

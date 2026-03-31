@@ -375,3 +375,70 @@ jobs:
 		t.Error("expected error for missing interval on non-adhoc job")
 	}
 }
+
+func TestLoad_VarsExpansion(t *testing.T) {
+	yaml := `
+vars:
+  PYTHON: /usr/bin/python3
+  DATA_DIR: /opt/data
+
+jobs:
+  fetch:
+    command: "{{.PYTHON}} scripts/fetch.py --output {{.DATA_DIR}}"
+    interval: 30m
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["fetch"]
+	if job.Commands[0] != "/usr/bin/python3 scripts/fetch.py --output /opt/data" {
+		t.Errorf("command = %q", job.Commands[0])
+	}
+}
+
+func TestLoad_VarsInMultipleCommands(t *testing.T) {
+	yaml := `
+vars:
+  PY: python3
+
+jobs:
+  pipeline:
+    command:
+      - "{{.PY}} step1.py"
+      - "{{.PY}} step2.py"
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["pipeline"]
+	if job.Commands[0] != "python3 step1.py" || job.Commands[1] != "python3 step2.py" {
+		t.Errorf("commands = %v", job.Commands)
+	}
+}
+
+func TestExpandVars(t *testing.T) {
+	vars := map[string]string{"FOO": "bar", "BIN": "/usr/local/bin"}
+	got := ExpandVars("{{.BIN}}/run --flag={{.FOO}}", vars)
+	want := "/usr/local/bin/run --flag=bar"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestExpandVars_NoVars(t *testing.T) {
+	got := ExpandVars("echo hello", nil)
+	if got != "echo hello" {
+		t.Errorf("got %q", got)
+	}
+}

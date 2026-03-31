@@ -113,6 +113,34 @@ jobs:
     interval: 1h
 ```
 
+### Variables
+
+Define reusable variables in a `vars` section. Use `{{.VAR_NAME}}` to reference them in commands:
+
+```yaml
+vars:
+  PYTHON: /usr/bin/python3
+  DATA_DIR: /opt/data
+
+jobs:
+  fetch:
+    command: "{{.PYTHON}} scripts/fetch.py --output {{.DATA_DIR}}"
+    interval: 30m
+
+  calibrate:
+    command: "{{.PYTHON}} scripts/calibrate.py {{.CLI_ARGS}}"
+    adhoc: true
+```
+
+`{{.CLI_ARGS}}` is a special built-in that expands to the extra arguments passed after `--`:
+
+```bash
+dispatch run calibrate -- weather crypto --parallel
+# runs: /usr/bin/python3 scripts/calibrate.py weather crypto --parallel
+```
+
+Variables are expanded at config load time (except `{{.CLI_ARGS}}` which is expanded at runtime). Use `${ENV_VAR}` for secrets from the environment, `{{.VAR}}` for config-level values.
+
 ### Adhoc jobs
 
 Jobs marked `adhoc: true` are never run by the scheduler -- they only run when you explicitly trigger them with `dispatch run` or `dispatch run-once`. Useful for manual tasks you want to keep in the config:
