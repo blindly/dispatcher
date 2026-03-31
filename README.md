@@ -15,8 +15,8 @@ Cron is great at scheduling, but terrible at everything else. If you've ever:
 Then dispatch is for you. It's a single binary that wraps your existing scripts and commands with scheduling, state tracking, retries, dependency ordering, and notifications -- all configured in one YAML file.
 
 **Good for:**
-- Data pipelines (fetch -> transform -> load) with dependency chains
-- Periodic API calls, health checks, and monitoring scripts
+- Data pipelines with dependency chains
+- Periodic health checks and monitoring scripts
 - Backup jobs with retry on failure
 - Any recurring task where you need visibility into what ran, when, and whether it worked
 
@@ -44,11 +44,11 @@ dispatch update
 ## Quick start
 
 ```bash
-dispatch init            # creates a dispatcher.yaml with an example job
-dispatch validate        # check config syntax
-dispatch run-once hello  # test run without tracking
-dispatch install         # set up cron to run every 5 minutes
-dispatch status          # see summary + cron state
+dispatch init              # creates a dispatcher.yaml with an example job
+dispatch validate          # check config syntax
+dispatch run-once hello    # test run without tracking
+dispatch install           # set up cron to run every 5 minutes
+dispatch status            # see summary + cron state
 ```
 
 ## Configuration
@@ -58,25 +58,55 @@ Create a `dispatcher.yaml` (or run `dispatch init`):
 ```yaml
 timezone: America/New_York
 
+vars:
+  BACKUP_DIR: /var/backups/myapp
+  S3_BUCKET: s3://myapp-backups
+
 notify:
   discord:
     webhook: ${DISCORD_WEBHOOK_URL}
 
 jobs:
-  fetch_data:
-    command: python scripts/fetch.py
-    interval: 30m
-    description: Fetch latest data
-    active_hours: [9, 17]
+  db-backup:
+    command:
+      - pg_dump myapp > {{.BACKUP_DIR}}/dump-$(date +%Y%m%d).sql
+      - gzip {{.BACKUP_DIR}}/dump-$(date +%Y%m%d).sql
+    interval: 1d
+    description: Dump and compress the database
+    active_hours: [2, 5]
+    timeout: 10m
+
+  upload-backup:
+    command: aws s3 cp {{.BACKUP_DIR}}/dump-$(date +%Y%m%d).sql.gz {{.S3_BUCKET}}/
+    interval: 1d
+    description: Push backup to S3
+    depends_on: db-backup
+    retries: 3
+    retry_delay: 30s
+
+  cleanup-old:
+    command: find {{.BACKUP_DIR}} -name "*.sql.gz" -mtime +30 -delete
+    interval: 1w
+    description: Delete backups older than 30 days
+
+  health-check:
+    command: curl -sf https://myapp.com/health
+    interval: 5m
+    description: Ping the app endpoint
     retries: 3
     retry_delay: 10s
-    timeout: 5m
+    timeout: 30s
 
-  process_data:
-    command: python scripts/process.py
-    interval: 1h
-    description: Process fetched data
-    depends_on: fetch_data
+  restore:
+    command: "gunzip -c {{.CLI_ARGS}} | psql myapp"
+    adhoc: true
+    description: Restore a backup (run manually)
+```
+
+This config sets up a daily backup pipeline: `db-backup` runs overnight, `upload-backup` waits for it to finish, `cleanup-old` runs weekly, and `health-check` pings every 5 minutes. The `restore` job is adhoc -- it only runs when you trigger it manually:
+
+```bash
+dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 ```
 
 ### Job options
@@ -95,13 +125,13 @@ jobs:
 
 \* `interval` is not required when `adhoc: true`.
 
-Environment variables in the form `${VAR_NAME}` are expanded throughout the config.
+Environment variables in the form `${VAR_NAME}` are expanded throughout the config -- use this for secrets. Config-level variables use `{{.VAR_NAME}}` syntax -- use this for paths, binaries, and other reusable values.
 
 Config file auto-detection checks: `dispatcher.yaml`, `dispatcher.yml`, `Dispatcher.yaml`, `Dispatcher.yml`.
 
 ### Multiple commands
 
-A job can run a single command or a sequence of commands. Commands run in order and stop on the first failure:
+A job can run a sequence of commands. They run in order and stop on the first failure:
 
 ```yaml
 jobs:
@@ -110,83 +140,78 @@ jobs:
       - git pull
       - npm install
       - npm run build
-    interval: 1h
+      - systemctl restart myapp
+    adhoc: true
 ```
 
 ### Variables
 
-Define reusable variables in a `vars` section. Use `{{.VAR_NAME}}` to reference them in commands:
+Define reusable variables in a `vars` section:
 
 ```yaml
 vars:
-  PYTHON: /usr/bin/python3
-  DATA_DIR: /opt/data
+  PY: /usr/bin/python3
+  APP_DIR: /opt/myapp
 
 jobs:
-  fetch:
-    command: "{{.PYTHON}} scripts/fetch.py --output {{.DATA_DIR}}"
-    interval: 30m
-
-  report:
-    command: "{{.PYTHON}} scripts/report.py {{.CLI_ARGS}}"
+  migrate:
+    command: "{{.PY}} {{.APP_DIR}}/manage.py migrate"
     adhoc: true
+
+  collect-metrics:
+    command: "{{.PY}} {{.APP_DIR}}/scripts/metrics.py"
+    interval: 15m
 ```
 
 `{{.CLI_ARGS}}` is a special built-in that expands to the extra arguments passed after `--`:
 
 ```bash
-dispatch run report -- --format pdf --output /tmp/report.pdf
-# runs: /usr/bin/python3 scripts/report.py --format pdf --output /tmp/report.pdf
+dispatch run migrate -- --fake-initial
+# runs: /usr/bin/python3 /opt/myapp/manage.py migrate --fake-initial
 ```
-
-Variables are expanded at config load time (except `{{.CLI_ARGS}}` which is expanded at runtime). Use `${ENV_VAR}` for secrets from the environment, `{{.VAR}}` for config-level values.
 
 ### Adhoc jobs
 
-Jobs marked `adhoc: true` are never run by the scheduler -- they only run when you explicitly trigger them with `dispatch run` or `dispatch run-once`. Useful for manual tasks you want to keep in the config:
+Jobs marked `adhoc: true` are never run by the scheduler -- they only run when you explicitly trigger them with `dispatch run` or `dispatch run-once`. No `interval` required:
 
 ```yaml
 jobs:
-  migrate:
-    command: python manage.py migrate
+  seed-db:
+    command: psql myapp < seed.sql
     adhoc: true
 ```
 
 ### Passing parameters to jobs
 
-You can pass environment variables and extra arguments when manually running a job:
+Pass environment variables and extra arguments when manually running a job:
 
 ```bash
-# Environment variables (KEY=VALUE before --)
+# Environment variables (KEY=VALUE)
 dispatch run deploy ENV=production VERSION=1.2.3
 
 # Extra args (after --) appended to the command
-dispatch run backup -- /data/important
+dispatch run restore -- /var/backups/dump-20260315.sql.gz
 
 # Both
-dispatch run deploy ENV=production -- --force
-
-# Works with run-once too
-dispatch run-once migrate DB_HOST=localhost -- --dry-run
+dispatch run deploy ENV=production -- --no-cache
 ```
 
-`KEY=VALUE` pairs are set as **environment variables** (`os.environ` in Python, `os.Getenv` in Go). Args after `--` are **appended to the command** (`sys.argv` in Python).
+`KEY=VALUE` pairs are set as **environment variables** in the subprocess. Args after `--` are **appended to the command** (or placed where `{{.CLI_ARGS}}` appears).
 
 ```python
 # scripts/deploy.py
 import argparse, os
 
-# Environment variables (KEY=VALUE)
-api_key = os.environ["API_KEY"]
+env = os.environ["ENV"]           # from KEY=VALUE
+version = os.environ["VERSION"]   # from KEY=VALUE
 
-# Extra args (after --)
 parser = argparse.ArgumentParser()
-parser.add_argument("--env", required=True)
-args = parser.parse_args()
+parser.add_argument("--no-cache", action="store_true")
+args = parser.parse_args()        # from -- args
 ```
 
 ```bash
-dispatch run deploy API_KEY=secret -- --env production
+dispatch run deploy ENV=production VERSION=1.2.3 -- --no-cache
 ```
 
 ## Usage
@@ -207,6 +232,7 @@ dispatch install         # add crontab entry (default: */5 * * * *)
 dispatch uninstall       # remove crontab entry
 dispatch update          # self-update to latest release
 dispatch version         # show current version
+dispatch docs            # show full documentation
 ```
 
 ## Crontab integration
@@ -232,13 +258,14 @@ Every run is logged to a history table. Use `dispatch analytics` to see success 
 ```
 Job                  Runs    Pass    Fail     Rate    Avg Time     Last 7d
 ----------------------------------------------------------------------------------------------------
-fetch_data            142     138       4    97.2%       12.3s      28/28
-process_data          140     135       5    96.4%       45.1s      27/28
-health_check          840     839       1    99.9%        1.2s    168/168
+db-backup              30      29       1    96.7%       45.2s      7/7
+upload-backup          29      28       1    96.6%       12.8s      7/7
+cleanup-old             4       4       0   100.0%        0.3s      1/1
+health-check          840     839       1    99.9%        1.2s    168/168
 
-Overall: 1122 runs, 99.1% success rate, 3 jobs
-Most reliable: health_check (99.9%)
-Least reliable: process_data (96.4%)
+Overall: 903 runs, 99.7% success rate, 4 jobs
+Most reliable: health-check (99.9%)
+Least reliable: upload-backup (96.6%)
 ```
 
 ## How it works
