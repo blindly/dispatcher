@@ -442,3 +442,36 @@ func TestExpandVars_NoVars(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestLoad_DotEnv(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write .env file
+	os.WriteFile(filepath.Join(dir, ".env"), []byte(`
+# comment
+MY_WEBHOOK=https://discord.com/api/webhooks/test
+QUOTED_VAR="hello world"
+`), 0644)
+
+	// Write config that references the env var
+	yaml := `
+notify:
+  discord:
+    webhook: ${MY_WEBHOOK}
+
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Notify.Discord.Webhook != "https://discord.com/api/webhooks/test" {
+		t.Errorf("webhook = %q", cfg.Notify.Discord.Webhook)
+	}
+}

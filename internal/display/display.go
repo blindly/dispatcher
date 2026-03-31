@@ -24,6 +24,15 @@ func FormatInterval(seconds int) string {
 	}
 }
 
+var displayLoc *time.Location
+
+func SetTimezone(tzName string) {
+	loc, err := time.LoadLocation(tzName)
+	if err == nil {
+		displayLoc = loc
+	}
+}
+
 func FormatDt(iso string) string {
 	if iso == "" {
 		return "-"
@@ -34,6 +43,9 @@ func FormatDt(iso string) string {
 			return iso[:19]
 		}
 		return iso
+	}
+	if displayLoc != nil {
+		t = t.In(displayLoc)
 	}
 	return t.Format("2006-01-02 15:04")
 }

@@ -80,7 +80,7 @@ func initConfig() {
 
 # notify:
 #   discord:
-#     webhook: https://discord.com/api/webhooks/...
+#     webhook: ${DISCORD_WEBHOOK_URL}
 
 jobs:
   hello:
@@ -270,6 +270,7 @@ func main() {
 	defer conn.Close()
 
 	db.EnsureJobs(conn, cfg.Jobs)
+	display.SetTimezone(cfg.Timezone)
 
 	// Read-only: no lock needed
 	if cmd == "list" {

@@ -2,4 +2,5 @@ dispatch
 data.db
 logs/
 .dispatch.lock
+.env
 CLAUDE.md

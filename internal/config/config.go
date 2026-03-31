@@ -98,6 +98,32 @@ func ExpandVars(text string, vars map[string]string) string {
 	return text
 }
 
+// LoadDotEnv reads a .env file and sets the variables in the process environment.
+func LoadDotEnv(dir string) {
+	envPath := dir + "/.env"
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return // .env is optional
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		// Strip surrounding quotes
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+			value = value[1 : len(value)-1]
+		}
+		os.Setenv(key, value)
+	}
+}
+
 func ExpandEnv(text string) string {
 	re := regexp.MustCompile(`\$\{(\w+)\}`)
 	return re.ReplaceAllStringFunc(text, func(match string) string {
@@ -107,6 +133,15 @@ func ExpandEnv(text string) string {
 }
 
 func Load(path string) (*DispatcherConfig, error) {
+	// Load .env from config directory before expanding variables
+	configDir := path
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		configDir = path[:idx]
+	} else {
+		configDir = "."
+	}
+	LoadDotEnv(configDir)
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config: %w", err)

@@ -72,7 +72,7 @@ vars:
 
 notify:
   discord:
-    webhook: https://discord.com/api/webhooks/123456/abcdef
+    webhook: ${DISCORD_WEBHOOK_URL}
 
 jobs:
   db-backup:
@@ -133,7 +133,15 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 
 \* `interval` is not required when `adhoc: true`.
 
-Shell environment variables in the form `${VAR_NAME}` are expanded throughout the config (e.g. `export MY_VAR=value` before running dispatch). Config-level variables use `{{.VAR_NAME}}` syntax from the `vars` section.
+Environment variables in the form `${VAR_NAME}` are expanded throughout the config. Variables are loaded from a `.env` file in the config directory (if present), then from the shell environment. Use this for secrets like webhook URLs:
+
+```
+# .env (same directory as dispatcher.yaml)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123456/abcdef
+API_KEY=your-secret-key
+```
+
+Config-level variables use `{{.VAR_NAME}}` syntax from the `vars` section — use these for paths, binaries, and other reusable non-secret values.
 
 Config file auto-detection checks: `dispatcher.yaml`, `dispatcher.yml`, `Dispatcher.yaml`, `Dispatcher.yml`.
 
