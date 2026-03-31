@@ -459,14 +459,12 @@ func installCron(schedule string, projectDir string) {
 		existing = string(out)
 	}
 
-	if strings.Contains(existing, projectDir) {
-		fmt.Printf("Cron already installed for %s\n", projectDir)
-		for _, line := range strings.Split(existing, "\n") {
-			if strings.Contains(line, projectDir) {
-				fmt.Printf("  %s\n", line)
-			}
+	for _, line := range strings.Split(existing, "\n") {
+		if strings.Contains(line, "dispatch") && strings.Contains(line, projectDir) {
+			fmt.Printf("Cron already installed for %s\n", projectDir)
+			fmt.Printf("  %s\n", line)
+			return
 		}
-		return
 	}
 
 	newCrontab := strings.TrimRight(existing, "\n") + "\n" + cronLine + "\n"
@@ -511,7 +509,7 @@ func uninstallCron(projectDir string) {
 	lines := strings.Split(string(out), "\n")
 	var filtered []string
 	for _, line := range lines {
-		if !strings.Contains(line, projectDir) {
+		if !(strings.Contains(line, "dispatch") && strings.Contains(line, projectDir)) {
 			filtered = append(filtered, line)
 		}
 	}

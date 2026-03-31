@@ -38,14 +38,14 @@ func FormatDt(iso string) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-// IsCronInstalled checks if a crontab entry exists for the given project directory.
+// IsCronInstalled checks if a dispatch crontab entry exists for the given project directory.
 func IsCronInstalled(projectDir string) (bool, string) {
 	out, err := exec.Command("crontab", "-l").Output()
 	if err != nil {
 		return false, ""
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, projectDir) {
+		if strings.Contains(line, "dispatch") && strings.Contains(line, projectDir) {
 			return true, strings.TrimSpace(line)
 		}
 	}
