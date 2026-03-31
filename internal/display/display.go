@@ -121,6 +121,16 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 	fmt.Printf("Cron: %s\n", cronStatus)
 }
 
+type jobRow struct {
+	name      string
+	lastRun   sql.NullString
+	nextRun   sql.NullString
+	status    sql.NullString
+	duration  sql.NullFloat64
+	runCount  int
+	failCount int
+}
+
 func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
 	now := db.NowUTC()
 
@@ -131,58 +141,77 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 	}
 	defer rows.Close()
 
-	fmt.Printf("\n%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5s  %5s\n",
-		"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails")
-	fmt.Println(strings.Repeat("-", 140))
-
+	var scheduled, adhoc []jobRow
 	for rows.Next() {
-		var name string
-		var lastRun, nextRun, status sql.NullString
-		var duration sql.NullFloat64
-		var runCount, failCount int
-
-		rows.Scan(&name, &lastRun, &nextRun, &status, &duration, &runCount, &failCount)
-
-		job, ok := jobs[name]
+		var r jobRow
+		rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount)
+		job, ok := jobs[r.name]
 		if !ok {
 			continue
 		}
-
-		interval := FormatInterval(job.IntervalSeconds)
 		if job.Adhoc {
-			interval = "-"
+			adhoc = append(adhoc, r)
+		} else {
+			scheduled = append(scheduled, r)
 		}
-		lr := "-"
-		if lastRun.Valid {
-			lr = FormatDt(lastRun.String)
-		}
-		nr := FormatDt(nextRun.String)
-		if job.Adhoc {
-			nr = "-"
-		}
-		st := "-"
-		if status.Valid {
-			st = status.String
-		}
+	}
 
-		isDue := ""
-		if nextRun.Valid && nextRun.String <= now.Format(time.RFC3339) {
-			isDue = "YES"
-		}
+	if len(scheduled) > 0 {
+		fmt.Printf("\nScheduled Jobs\n")
+		fmt.Printf("%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5s  %5s\n",
+			"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails")
+		fmt.Println(strings.Repeat("-", 140))
 
-		active := "always"
-		if job.Adhoc {
-			active = "adhoc"
-			isDue = ""
-		} else if job.ActiveHours != nil {
-			active = fmt.Sprintf("%02d-%02d", job.ActiveHours[0], job.ActiveHours[1])
-			if !db.IsInActiveHours(job.ActiveHours, tzName) {
-				isDue = ""
+		for _, r := range scheduled {
+			job := jobs[r.name]
+			interval := FormatInterval(job.IntervalSeconds)
+			lr := "-"
+			if r.lastRun.Valid {
+				lr = FormatDt(r.lastRun.String)
 			}
+			nr := FormatDt(r.nextRun.String)
+			st := "-"
+			if r.status.Valid {
+				st = r.status.String
+			}
+			isDue := ""
+			if r.nextRun.Valid && r.nextRun.String <= now.Format(time.RFC3339) {
+				isDue = "YES"
+			}
+			active := "always"
+			if job.ActiveHours != nil {
+				active = fmt.Sprintf("%02d-%02d", job.ActiveHours[0], job.ActiveHours[1])
+				if !db.IsInActiveHours(job.ActiveHours, tzName) {
+					isDue = ""
+				}
+			}
+			fmt.Printf("%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5d  %5d\n",
+				r.name, interval, active, lr, st, nr, isDue, r.runCount, r.failCount)
 		}
+	}
 
-		fmt.Printf("%-30s  %8s  %10s  %-19s  %10s  %-19s  %4s  %5d  %5d\n",
-			name, interval, active, lr, st, nr, isDue, runCount, failCount)
+	if len(adhoc) > 0 {
+		fmt.Printf("\nAdhoc Jobs\n")
+		fmt.Printf("%-30s  %-19s  %10s  %5s  %5s\n",
+			"Name", "Last Run", "Status", "Runs", "Fails")
+		fmt.Println(strings.Repeat("-", 80))
+
+		for _, r := range adhoc {
+			lr := "-"
+			if r.lastRun.Valid {
+				lr = FormatDt(r.lastRun.String)
+			}
+			st := "-"
+			if r.status.Valid {
+				st = r.status.String
+			}
+			fmt.Printf("%-30s  %-19s  %10s  %5d  %5d\n",
+				r.name, lr, st, r.runCount, r.failCount)
+		}
+	}
+
+	if len(scheduled) == 0 && len(adhoc) == 0 {
+		fmt.Println("\nNo jobs configured.")
 	}
 	fmt.Println()
 }
