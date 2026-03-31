@@ -55,12 +55,12 @@ func IsCronInstalled(projectDir string) (bool, string) {
 func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string) {
 	now := db.NowUTC()
 
-	var totalJobs, dueCount, totalRuns, totalFails int
+	var totalJobs, dueCount, runningCount, totalRuns, totalFails int
 	var lastRunAt sql.NullString
 
 	totalJobs = len(jobs)
 
-	rows, err := conn.Query("SELECT name, next_run_at, last_run_at, run_count, fail_count FROM cron_jobs ORDER BY last_run_at DESC")
+	rows, err := conn.Query("SELECT name, next_run_at, last_run_at, run_count, fail_count, running_since FROM cron_jobs ORDER BY last_run_at DESC")
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -70,9 +70,9 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 	first := true
 	for rows.Next() {
 		var name, nextRun string
-		var lr sql.NullString
+		var lr, runningSince sql.NullString
 		var runs, fails int
-		rows.Scan(&name, &nextRun, &lr, &runs, &fails)
+		rows.Scan(&name, &nextRun, &lr, &runs, &fails, &runningSince)
 
 		job, ok := jobs[name]
 		if !ok {
@@ -82,6 +82,10 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		if first && lr.Valid {
 			lastRunAt = lr
 			first = false
+		}
+
+		if runningSince.Valid {
+			runningCount++
 		}
 
 		totalRuns += runs
@@ -116,25 +120,45 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		cronStatus = "installed (" + schedule + ")"
 	}
 
-	fmt.Printf("Last run: %s | %d jobs | %d due | %d total runs | %d failures\n",
+	statusLine := fmt.Sprintf("Last run: %s | %d jobs | %d due | %d total runs | %d failures",
 		lastRunStr, totalJobs, dueCount, totalRuns, totalFails)
+	if runningCount > 0 {
+		statusLine += fmt.Sprintf(" | %d running", runningCount)
+	}
+	fmt.Println(statusLine)
 	fmt.Printf("Cron: %s\n", cronStatus)
 }
 
 type jobRow struct {
-	name      string
-	lastRun   sql.NullString
-	nextRun   sql.NullString
-	status    sql.NullString
-	duration  sql.NullFloat64
-	runCount  int
-	failCount int
+	name         string
+	lastRun      sql.NullString
+	nextRun      sql.NullString
+	status       sql.NullString
+	duration     sql.NullFloat64
+	runCount     int
+	failCount    int
+	runningSince sql.NullString
+}
+
+func formatRunning(runningSince sql.NullString, now time.Time) string {
+	if !runningSince.Valid {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, runningSince.String)
+	if err != nil {
+		return "RUNNING"
+	}
+	elapsed := now.Sub(t)
+	if elapsed < time.Minute {
+		return fmt.Sprintf("RUNNING (%ds)", int(elapsed.Seconds()))
+	}
+	return fmt.Sprintf("RUNNING (%dm)", int(elapsed.Minutes()))
 }
 
 func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
 	now := db.NowUTC()
 
-	rows, err := conn.Query("SELECT name, last_run_at, next_run_at, last_status, last_duration_s, run_count, fail_count FROM cron_jobs ORDER BY next_run_at")
+	rows, err := conn.Query("SELECT name, last_run_at, next_run_at, last_status, last_duration_s, run_count, fail_count, running_since FROM cron_jobs ORDER BY next_run_at")
 	if err != nil {
 		fmt.Printf("Error querying jobs: %v\n", err)
 		return
@@ -144,7 +168,7 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 	var scheduled, adhoc []jobRow
 	for rows.Next() {
 		var r jobRow
-		rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount)
+		rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount, &r.runningSince)
 		job, ok := jobs[r.name]
 		if !ok {
 			continue
@@ -171,7 +195,9 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 			}
 			nr := FormatDt(r.nextRun.String)
 			st := "-"
-			if r.status.Valid {
+			if running := formatRunning(r.runningSince, now); running != "" {
+				st = running
+			} else if r.status.Valid {
 				st = r.status.String
 			}
 			isDue := ""
@@ -202,7 +228,9 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 				lr = FormatDt(r.lastRun.String)
 			}
 			st := "-"
-			if r.status.Valid {
+			if running := formatRunning(r.runningSince, now); running != "" {
+				st = running
+			} else if r.status.Valid {
 				st = r.status.String
 			}
 			fmt.Printf("%-30s  %-19s  %10s  %5d  %5d\n",

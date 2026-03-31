@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS job_runs (
 
 CREATE INDEX IF NOT EXISTS idx_job_runs_name_run_at ON job_runs(name, run_at);`
 
+const migration1 = `ALTER TABLE cron_jobs ADD COLUMN running_since TEXT;`
+
 func Open(dbPath string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -42,7 +44,18 @@ func Open(dbPath string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("creating schema: %w", err)
 	}
+	// Migration: add running_since column if missing
+	db.Exec(migration1)
 	return db, nil
+}
+
+func MarkRunning(db *sql.DB, name string) {
+	now := NowUTC().Format(time.RFC3339)
+	db.Exec("UPDATE cron_jobs SET running_since = ? WHERE name = ?", now, name)
+}
+
+func ClearRunning(db *sql.DB, name string) {
+	db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ?", name)
 }
 
 func NowUTC() time.Time {

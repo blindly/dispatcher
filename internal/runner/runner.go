@@ -88,6 +88,9 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	header := fmt.Sprintf("[%s] START %s — %s\n", ts, job.Name, job.Description)
 	fmt.Print(header)
 
+	db.MarkRunning(conn, job.Name)
+	defer db.ClearRunning(conn, job.Name)
+
 	start := time.Now()
 	rc, output := RunOnce(job, extraArgs, extraEnv)
 
