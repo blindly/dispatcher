@@ -119,9 +119,21 @@ func Update(currentVersion string, targetVersion string) error {
 		return fmt.Errorf("setting permissions: %w", err)
 	}
 
-	// Atomic replace
-	if err := os.Rename(tmpPath, execPath); err != nil {
-		return fmt.Errorf("replacing binary: %w", err)
+	// On Windows, can't overwrite a running binary — rename old one first
+	oldPath := execPath + ".old"
+	os.Remove(oldPath) // clean up any previous .old file
+	if err := os.Rename(execPath, oldPath); err != nil {
+		// Not on Windows or not locked — try direct replace
+		if err := os.Rename(tmpPath, execPath); err != nil {
+			return fmt.Errorf("replacing binary: %w", err)
+		}
+	} else {
+		if err := os.Rename(tmpPath, execPath); err != nil {
+			// Restore old binary
+			os.Rename(oldPath, execPath)
+			return fmt.Errorf("replacing binary: %w", err)
+		}
+		os.Remove(oldPath) // clean up
 	}
 
 	fmt.Printf("Updated to %s\n", rel.TagName)
