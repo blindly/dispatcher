@@ -307,6 +307,9 @@ func main() {
 		rc, elapsed, output := runner.RunJob(conn, job)
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output}}
 		notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+		if rc != 0 {
+			os.Exit(1)
+		}
 
 	case "run-all":
 		var results []notify.JobResult
@@ -315,6 +318,11 @@ func main() {
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output})
 		}
 		notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+		for _, r := range results {
+			if r.ExitCode != 0 {
+				os.Exit(1)
+			}
+		}
 
 	case "":
 		dispatch(conn, cfg)
@@ -343,11 +351,16 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 	for _, name := range ordered {
 		job := cfg.Jobs[name]
 		if job.DependsOn != "" {
+			skip := false
 			for _, r := range results {
 				if r.Name == job.DependsOn && r.ExitCode != 0 {
 					fmt.Printf("  SKIP %s — dependency %s failed\n\n", name, job.DependsOn)
-					continue
+					skip = true
+					break
 				}
+			}
+			if skip {
+				continue
 			}
 		}
 		rc, elapsed, output := runner.RunJob(conn, job)
