@@ -241,6 +241,9 @@ dispatch run-once <job>  # run without DB tracking
 dispatch run-all         # force-run all scheduled jobs
 dispatch reset <job>     # reset schedule to run now
 dispatch logs <job>      # show recent job output
+dispatch watch           # live tail all job logs
+dispatch watch <job>     # live tail a specific job
+dispatch history <job>   # show last 20 runs for a job
 dispatch analytics       # job success rates and run history
 dispatch validate        # check config syntax
 dispatch init            # create default config
