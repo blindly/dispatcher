@@ -79,7 +79,7 @@ func initConfig() {
 
 # notify:
 #   discord:
-#     webhook: ${DISCORD_WEBHOOK_URL}
+#     webhook: https://discord.com/api/webhooks/...
 
 jobs:
   hello:

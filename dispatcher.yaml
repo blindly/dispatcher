@@ -2,7 +2,7 @@ timezone: America/New_York
 
 notify:
   discord:
-    webhook: ${DISCORD_WEBHOOK_URL}
+    webhook: https://discord.com/api/webhooks/...
 
 jobs:
   hello:
