@@ -335,3 +335,43 @@ jobs:
 		t.Errorf("commands = %v", job.Commands)
 	}
 }
+
+func TestLoad_AdhocNoInterval(t *testing.T) {
+	yaml := `
+jobs:
+  manual:
+    command: echo hi
+    adhoc: true
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["manual"]
+	if !job.Adhoc {
+		t.Error("expected adhoc=true")
+	}
+	if job.IntervalSeconds != 0 {
+		t.Errorf("interval = %d, want 0", job.IntervalSeconds)
+	}
+}
+
+func TestLoad_NonAdhocRequiresInterval(t *testing.T) {
+	yaml := `
+jobs:
+  broken:
+    command: echo hi
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for missing interval on non-adhoc job")
+	}
+}

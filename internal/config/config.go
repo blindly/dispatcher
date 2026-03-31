@@ -125,9 +125,15 @@ func Load(path string) (*DispatcherConfig, error) {
 	}
 
 	for name, rj := range raw.Jobs {
-		intervalSec, err := ParseInterval(rj.Interval)
-		if err != nil {
-			return nil, fmt.Errorf("job %q: %w", name, err)
+		var intervalSec int
+		if rj.Interval != "" {
+			var err error
+			intervalSec, err = ParseInterval(rj.Interval)
+			if err != nil {
+				return nil, fmt.Errorf("job %q: %w", name, err)
+			}
+		} else if !rj.Adhoc {
+			return nil, fmt.Errorf("job %q: interval is required (unless adhoc: true)", name)
 		}
 
 		job := &JobConfig{
