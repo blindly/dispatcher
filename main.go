@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/blindly/dispatcher/internal/config"
@@ -382,25 +381,7 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 	notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
 }
 
-func acquireLock(dir string) int {
-	lockPath := filepath.Join(dir, ".dispatch.lock")
-	fd, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_WRONLY, 0644)
-	if err != nil {
-		return -1
-	}
-	err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
-	if err != nil {
-		syscall.Close(fd)
-		return -1
-	}
-	return fd
-}
-
-func releaseLock(fd int, dir string) {
-	syscall.Flock(fd, syscall.LOCK_UN)
-	syscall.Close(fd)
-	os.Remove(filepath.Join(dir, ".dispatch.lock"))
-}
+// acquireLock and releaseLock are in lock_unix.go / lock_windows.go
 
 func installCron(schedule string, projectDir string) {
 	dispatchPath, err := os.Executable()
