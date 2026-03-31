@@ -2,3 +2,4 @@ dispatch
 data.db
 logs/
 .dispatch.lock
+CLAUDE.md
