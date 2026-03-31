@@ -23,7 +23,11 @@ type asset struct {
 }
 
 func assetName() string {
-	return fmt.Sprintf("dispatch-%s-%s", runtime.GOOS, runtime.GOARCH)
+	name := fmt.Sprintf("dispatch-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
 }
 
 func fetchRelease(version string) (*release, error) {
