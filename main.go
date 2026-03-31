@@ -3,6 +3,8 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +38,7 @@ Commands:
   uninstall    Remove crontab entry
   update       Self-update to latest release
   version      Show current version
+  docs         Show full documentation
 
 Options:
   --config     Config file path (default: dispatcher.yaml)
@@ -130,6 +133,11 @@ func main() {
 	if cmd == "version" {
 		fmt.Printf("dispatch %s\n", version)
 		os.Exit(0)
+	}
+
+	if cmd == "docs" {
+		showDocs()
+		return
 	}
 
 	if cmd == "update" {
@@ -385,6 +393,29 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 	fmt.Printf("%s\n  Done: %d ok, %d failed, %.1fs total\n%s\n", sep, passed, failed, totalTime, sep)
 
 	notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+}
+
+func showDocs() {
+	url := "https://raw.githubusercontent.com/blindly/dispatcher/main/README.md"
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to fetch docs: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		fmt.Fprintf(os.Stderr, "Failed to fetch docs: HTTP %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to read docs: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Print(string(body))
 }
 
 // parseJobArgs splits args after the job name into env vars (KEY=VALUE) and extra args (after --).
