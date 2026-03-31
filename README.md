@@ -65,6 +65,7 @@ Create a `dispatcher.yaml` (or run `dispatch init`):
 
 ```yaml
 timezone: America/New_York
+schedule: "*/5 * * * *"   # how often cron checks for due jobs (default: */5)
 
 vars:
   BACKUP_DIR: /var/backups/myapp
@@ -256,11 +257,19 @@ dispatch docs            # show full documentation
 
 ## Crontab integration
 
+The `schedule` field in `dispatcher.yaml` controls how often cron fires the dispatcher. `dispatch install` reads it from the config:
+
+```yaml
+schedule: "*/1 * * * *"   # check for due jobs every minute
+```
+
+If omitted, defaults to `*/5 * * * *` (every 5 minutes).
+
 ```bash
-# Install (default: every 5 minutes)
+# Install using schedule from config
 dispatch install
 
-# Custom schedule
+# Override with a custom schedule
 dispatch install "*/10 * * * *"
 
 # Check if installed
