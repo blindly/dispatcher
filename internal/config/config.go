@@ -12,7 +12,7 @@ import (
 
 type JobConfig struct {
 	Name            string
-	Command         string `yaml:"command"`
+	Commands        []string // one or more commands to run in sequence
 	IntervalSeconds int
 	Description     string  `yaml:"description"`
 	ActiveHours     *[2]int `yaml:"-"`
@@ -38,10 +38,26 @@ type DispatcherConfig struct {
 	DbPath   string       `yaml:"db_path"`
 }
 
+// stringOrList handles YAML values that can be either a string or list of strings.
+type stringOrList []string
+
+func (s *stringOrList) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		*s = []string{value.Value}
+		return nil
+	}
+	var list []string
+	if err := value.Decode(&list); err != nil {
+		return err
+	}
+	*s = list
+	return nil
+}
+
 // rawJob is the intermediate YAML structure before parsing.
 type rawJob struct {
-	Command     string `yaml:"command"`
-	Interval    string `yaml:"interval"`
+	Command     stringOrList `yaml:"command"`
+	Interval    string       `yaml:"interval"`
 	Description string `yaml:"description"`
 	ActiveHours []int  `yaml:"active_hours"`
 	DependsOn   string `yaml:"depends_on"`
@@ -116,7 +132,7 @@ func Load(path string) (*DispatcherConfig, error) {
 
 		job := &JobConfig{
 			Name:            name,
-			Command:         rj.Command,
+			Commands:        []string(rj.Command),
 			IntervalSeconds: intervalSec,
 			Description:     rj.Description,
 			DependsOn:       rj.DependsOn,

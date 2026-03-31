@@ -35,8 +35,8 @@ func TestEnsureJobs_RegistersNew(t *testing.T) {
 	defer conn.Close()
 
 	jobs := map[string]*config.JobConfig{
-		"job_a": {Name: "job_a", Command: "echo a", IntervalSeconds: 300},
-		"job_b": {Name: "job_b", Command: "echo b", IntervalSeconds: 600},
+		"job_a": {Name: "job_a", Commands: []string{"echo a"}, IntervalSeconds: 300},
+		"job_b": {Name: "job_b", Commands: []string{"echo b"}, IntervalSeconds: 600},
 	}
 	EnsureJobs(conn, jobs)
 
@@ -71,8 +71,8 @@ func TestGetDueJobs_ReturnsOverdue(t *testing.T) {
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "future", future)
 
 	jobs := map[string]*config.JobConfig{
-		"overdue": {Name: "overdue", Command: "echo", IntervalSeconds: 300},
-		"future":  {Name: "future", Command: "echo", IntervalSeconds: 300},
+		"overdue": {Name: "overdue", Commands: []string{"echo"}, IntervalSeconds: 300},
+		"future":  {Name: "future", Commands: []string{"echo"}, IntervalSeconds: 300},
 	}
 	due := GetDueJobs(conn, jobs, "America/New_York")
 
@@ -104,7 +104,7 @@ func TestGetDueJobs_FiltersActiveHours(t *testing.T) {
 	// active_hours 3-4 AM — almost certainly not the current hour
 	hours := [2]int{3, 4}
 	jobs := map[string]*config.JobConfig{
-		"narrow": {Name: "narrow", Command: "echo", IntervalSeconds: 300, ActiveHours: &hours},
+		"narrow": {Name: "narrow", Commands: []string{"echo"}, IntervalSeconds: 300, ActiveHours: &hours},
 	}
 	due := GetDueJobs(conn, jobs, "America/New_York")
 	for _, name := range due {

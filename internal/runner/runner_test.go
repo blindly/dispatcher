@@ -13,7 +13,7 @@ import (
 func TestRunOnce_Success(t *testing.T) {
 	job := &config.JobConfig{
 		Name:    "echo_test",
-		Command: "echo hello",
+		Commands: []string{"echo hello"},
 	}
 	rc, output := RunOnce(job)
 	if rc != 0 {
@@ -31,7 +31,7 @@ func TestRunOnce_Failure(t *testing.T) {
 	}
 	job := &config.JobConfig{
 		Name:    "fail_test",
-		Command: cmd,
+		Commands: []string{cmd},
 	}
 	rc, _ := RunOnce(job)
 	if rc == 0 {
@@ -49,7 +49,7 @@ func TestRunJob_UpdatesDB(t *testing.T) {
 
 	job := &config.JobConfig{
 		Name:            "test_echo",
-		Command:         "echo hello",
+		Commands:        []string{"echo hello"},
 		IntervalSeconds: 300,
 		Retries:         0,
 		RetryDelay:      1,
@@ -76,11 +76,43 @@ func TestRunJob_UpdatesDB(t *testing.T) {
 	}
 }
 
+func TestRunOnce_MultipleCommands(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "multi_test",
+		Commands: []string{"echo hello", "echo world"},
+	}
+	rc, output := RunOnce(job)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "hello") || !strings.Contains(output, "world") {
+		t.Errorf("output = %q, want both hello and world", output)
+	}
+}
+
+func TestRunOnce_MultipleCommandsStopsOnFailure(t *testing.T) {
+	cmd := "false"
+	if runtime.GOOS == "windows" {
+		cmd = "cmd /c exit 1"
+	}
+	job := &config.JobConfig{
+		Name:     "multi_fail_test",
+		Commands: []string{cmd, "echo should-not-run"},
+	}
+	rc, output := RunOnce(job)
+	if rc == 0 {
+		t.Error("expected non-zero exit code")
+	}
+	if strings.Contains(output, "should-not-run") {
+		t.Error("second command should not have run")
+	}
+}
+
 func TestResolveOrder_RespectsDependencies(t *testing.T) {
 	jobs := map[string]*config.JobConfig{
-		"fetch": {Name: "fetch", Command: "echo", IntervalSeconds: 300},
-		"scan":  {Name: "scan", Command: "echo", IntervalSeconds: 300, DependsOn: "fetch"},
-		"other": {Name: "other", Command: "echo", IntervalSeconds: 300},
+		"fetch": {Name: "fetch", Commands: []string{"echo"}, IntervalSeconds: 300},
+		"scan":  {Name: "scan", Commands: []string{"echo"}, IntervalSeconds: 300, DependsOn: "fetch"},
+		"other": {Name: "other", Commands: []string{"echo"}, IntervalSeconds: 300},
 	}
 	due := []string{"scan", "fetch", "other"}
 	ordered := ResolveOrder(due, jobs)
@@ -104,8 +136,8 @@ func TestResolveOrder_RespectsDependencies(t *testing.T) {
 
 func TestResolveOrder_DepNotDue(t *testing.T) {
 	jobs := map[string]*config.JobConfig{
-		"fetch": {Name: "fetch", Command: "echo", IntervalSeconds: 300},
-		"scan":  {Name: "scan", Command: "echo", IntervalSeconds: 300, DependsOn: "fetch"},
+		"fetch": {Name: "fetch", Commands: []string{"echo"}, IntervalSeconds: 300},
+		"scan":  {Name: "scan", Commands: []string{"echo"}, IntervalSeconds: 300, DependsOn: "fetch"},
 	}
 	due := []string{"scan"}
 	ordered := ResolveOrder(due, jobs)

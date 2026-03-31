@@ -117,8 +117,8 @@ jobs:
 		t.Fatalf("got %d jobs, want 2", len(cfg.Jobs))
 	}
 	job := cfg.Jobs["test_job"]
-	if job.Command != "echo hello" {
-		t.Errorf("command = %q", job.Command)
+	if len(job.Commands) != 1 || job.Commands[0] != "echo hello" {
+		t.Errorf("commands = %v", job.Commands)
 	}
 	if job.IntervalSeconds != 300 {
 		t.Errorf("interval = %d, want 300", job.IntervalSeconds)
@@ -307,5 +307,31 @@ jobs:
 	}
 	if !cfg.Jobs["j1"].Adhoc {
 		t.Error("expected adhoc=true")
+	}
+}
+
+func TestLoad_MultipleCommands(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command:
+      - echo hello
+      - echo world
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["j1"]
+	if len(job.Commands) != 2 {
+		t.Fatalf("got %d commands, want 2", len(job.Commands))
+	}
+	if job.Commands[0] != "echo hello" || job.Commands[1] != "echo world" {
+		t.Errorf("commands = %v", job.Commands)
 	}
 }

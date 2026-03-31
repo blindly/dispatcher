@@ -26,14 +26,10 @@ func writeJobLog(name string, content string) {
 	f.WriteString(content)
 }
 
-func RunOnce(job *config.JobConfig) (int, string) {
-	parts := strings.Fields(job.Command)
+func runCommand(command string, timeout int) (int, string) {
+	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return -2, "empty command"
-	}
-	timeout := job.Timeout
-	if timeout <= 0 {
-		timeout = 600
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
@@ -51,6 +47,26 @@ func RunOnce(job *config.JobConfig) (int, string) {
 		return -2, err.Error()
 	}
 	return 0, string(out)
+}
+
+func RunOnce(job *config.JobConfig) (int, string) {
+	if len(job.Commands) == 0 {
+		return -2, "empty command"
+	}
+	timeout := job.Timeout
+	if timeout <= 0 {
+		timeout = 600
+	}
+
+	var allOutput strings.Builder
+	for _, command := range job.Commands {
+		rc, output := runCommand(command, timeout)
+		allOutput.WriteString(output)
+		if rc != 0 {
+			return rc, allOutput.String()
+		}
+	}
+	return 0, allOutput.String()
 }
 
 func RunJob(conn *sql.DB, job *config.JobConfig) (int, float64, string) {

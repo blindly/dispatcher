@@ -426,7 +426,7 @@ func selfUpdate(targetVersion string) error {
 
 func validateJob(name string, job *config.JobConfig, allJobs map[string]*config.JobConfig) []string {
 	var issues []string
-	if job.Command == "" {
+	if len(job.Commands) == 0 {
 		issues = append(issues, fmt.Sprintf("%s: empty command", name))
 	}
 	if job.DependsOn != "" {

@@ -55,7 +55,7 @@ func TestPrintQuickStatus(t *testing.T) {
 	defer conn.Close()
 
 	jobs := map[string]*config.JobConfig{
-		"j1": {Name: "j1", Command: "echo", IntervalSeconds: 300},
+		"j1": {Name: "j1", Commands: []string{"echo"}, IntervalSeconds: 300},
 	}
 	db.EnsureJobs(conn, jobs)
 
