@@ -317,6 +317,29 @@ func main() {
 		return
 	}
 
+	// dispatch run for adhoc jobs — no lock needed
+	if cmd == "run" {
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: dispatch run <job> [KEY=VALUE...] [-- args...]")
+			os.Exit(1)
+		}
+		job, ok := cfg.Jobs[args[0]]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
+			os.Exit(1)
+		}
+		if job.Adhoc {
+			extraEnv, extraArgs := parseJobArgs(args[1:])
+			rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
+			results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output}}
+			notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+			if rc != 0 {
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	// Execution commands — acquire lock
 	lockFd := acquireLock(configDir)
 	if lockFd == -1 {
@@ -327,15 +350,8 @@ func main() {
 
 	switch cmd {
 	case "run":
-		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch run <job> [KEY=VALUE...] [-- args...]")
-			os.Exit(1)
-		}
-		job, ok := cfg.Jobs[args[0]]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
-			os.Exit(1)
-		}
+		// Non-adhoc jobs (adhoc handled above)
+		job := cfg.Jobs[args[0]]
 		extraEnv, extraArgs := parseJobArgs(args[1:])
 		rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output}}
