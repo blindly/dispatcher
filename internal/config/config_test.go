@@ -475,3 +475,44 @@ jobs:
 		t.Errorf("webhook = %q", cfg.Notify.Discord.Webhook)
 	}
 }
+
+func TestLoad_ScheduleDefault(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Schedule != "*/5 * * * *" {
+		t.Errorf("schedule = %q, want */5 * * * *", cfg.Schedule)
+	}
+}
+
+func TestLoad_ScheduleCustom(t *testing.T) {
+	yaml := `
+schedule: "*/1 * * * *"
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Schedule != "*/1 * * * *" {
+		t.Errorf("schedule = %q, want */1 * * * *", cfg.Schedule)
+	}
+}

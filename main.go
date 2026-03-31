@@ -77,6 +77,7 @@ func initConfig() {
 	}
 
 	defaultConfig := `timezone: America/New_York
+# schedule: "*/5 * * * *"
 
 # notify:
 #   discord:
@@ -180,9 +181,9 @@ func main() {
 
 	// install/uninstall don't need DB
 	if cmd == "install" {
-		schedule := "*/5 * * * *"
+		schedule := cfg.Schedule
 		if len(args) > 0 {
-			schedule = args[0]
+			schedule = args[0] // CLI arg overrides config
 		}
 		installCron(schedule, configDir)
 		return

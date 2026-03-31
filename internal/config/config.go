@@ -36,6 +36,7 @@ type DispatcherConfig struct {
 	Notify   NotifyConfig      `yaml:"notify"`
 	Jobs     map[string]*JobConfig
 	DbPath   string            `yaml:"db_path"`
+	Schedule string            `yaml:"schedule"`
 	Vars     map[string]string `yaml:"vars"`
 }
 
@@ -73,6 +74,7 @@ type rawConfig struct {
 	Notify         NotifyConfig      `yaml:"notify"`
 	Jobs           map[string]rawJob `yaml:"jobs"`
 	DbPath         string            `yaml:"db_path"`
+	Schedule       string            `yaml:"schedule"`
 	DiscordWebhook string            `yaml:"discord_webhook"`
 	Vars           map[string]string `yaml:"vars"`
 }
@@ -159,11 +161,17 @@ func Load(path string) (*DispatcherConfig, error) {
 		vars = make(map[string]string)
 	}
 
+	schedule := raw.Schedule
+	if schedule == "" {
+		schedule = "*/5 * * * *"
+	}
+
 	cfg := &DispatcherConfig{
 		Timezone: raw.Timezone,
 		Notify:   raw.Notify,
 		Jobs:     make(map[string]*JobConfig),
 		DbPath:   raw.DbPath,
+		Schedule: schedule,
 		Vars:     vars,
 	}
 
