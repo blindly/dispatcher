@@ -1,9 +1,11 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -43,14 +45,13 @@ func writeLog(f *os.File, content string) {
 	}
 }
 
-func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []string, extraEnv []string) (int, string) {
+func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []string, extraEnv []string, logFile *os.File) (int, string) {
 	var cmd *exec.Cmd
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	if job.Shell != "" {
-		// Use specified shell
 		fullCmd := command
 		if len(extraArgs) > 0 {
 			fullCmd += " " + strings.Join(extraArgs, " ")
@@ -77,20 +78,34 @@ func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []
 		cmd.Dir = job.Dir
 	}
 
-	out, err := cmd.CombinedOutput()
+	// Stream output to both a buffer and the log file
+	var buf bytes.Buffer
+	if logFile != nil {
+		cmd.Stdout = io.MultiWriter(&buf, logFile)
+		cmd.Stderr = io.MultiWriter(&buf, logFile)
+	} else {
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+	}
+
+	err := cmd.Run()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return -1, fmt.Sprintf("TIMEOUT after %ds", timeout)
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return exitErr.ExitCode(), string(out)
+			return exitErr.ExitCode(), buf.String()
 		}
 		return -2, err.Error()
 	}
-	return 0, string(out)
+	return 0, buf.String()
 }
 
 func RunOnce(job *config.JobConfig, extraArgs []string, extraEnv []string) (int, string) {
+	return runOnceWithLog(job, extraArgs, extraEnv, nil)
+}
+
+func runOnceWithLog(job *config.JobConfig, extraArgs []string, extraEnv []string, logFile *os.File) (int, string) {
 	if len(job.Commands) == 0 {
 		return -2, "empty command"
 	}
@@ -103,16 +118,15 @@ func RunOnce(job *config.JobConfig, extraArgs []string, extraEnv []string) (int,
 
 	var allOutput strings.Builder
 	for _, command := range job.Commands {
-		// If command uses {{.CLI_ARGS}}, substitute inline; otherwise append extraArgs
 		if strings.Contains(command, "{{.CLI_ARGS}}") {
 			command = strings.ReplaceAll(command, "{{.CLI_ARGS}}", cliArgs)
-			rc, output := runCommand(command, job, timeout, nil, extraEnv)
+			rc, output := runCommand(command, job, timeout, nil, extraEnv, logFile)
 			allOutput.WriteString(output)
 			if rc != 0 {
 				return rc, allOutput.String()
 			}
 		} else {
-			rc, output := runCommand(command, job, timeout, extraArgs, extraEnv)
+			rc, output := runCommand(command, job, timeout, extraArgs, extraEnv, logFile)
 			allOutput.WriteString(output)
 			if rc != 0 {
 				return rc, allOutput.String()
@@ -148,8 +162,7 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	defer signal.Stop(sigCh)
 
 	start := time.Now()
-	rc, output := RunOnce(job, extraArgs, extraEnv)
-	writeLog(logFile, output)
+	rc, output := runOnceWithLog(job, extraArgs, extraEnv, logFile)
 
 	attempt := 1
 	for rc != 0 && rc != -1 && attempt <= job.Retries {
@@ -158,8 +171,7 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 		fmt.Print(retryMsg)
 		writeLog(logFile, retryMsg)
 		time.Sleep(time.Duration(job.RetryDelay) * time.Second)
-		rc, output = RunOnce(job, extraArgs, extraEnv)
-		writeLog(logFile, output)
+		rc, output = runOnceWithLog(job, extraArgs, extraEnv, logFile)
 		attempt++
 	}
 
