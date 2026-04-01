@@ -54,9 +54,37 @@ func ClearAllRunning(db *sql.DB) {
 }
 
 func ClearStaleRunning(db *sql.DB, jobs map[string]*config.JobConfig) {
+	now := NowUTC()
 	for name, job := range jobs {
-		if !job.Adhoc {
-			db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ? AND running_since IS NOT NULL", name)
+		var runningSince sql.NullString
+		db.QueryRow("SELECT running_since FROM cron_jobs WHERE name = ?", name).Scan(&runningSince)
+		if !runningSince.Valid {
+			continue
+		}
+
+		started, err := time.Parse(time.RFC3339, runningSince.String)
+		if err != nil {
+			db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ?", name)
+			continue
+		}
+
+		elapsed := now.Sub(started)
+		timeout := time.Duration(job.Timeout) * time.Second
+		if timeout <= 0 {
+			timeout = 600 * time.Second
+		}
+
+		if elapsed > timeout {
+			// Stale — exceeded timeout, mark as failed
+			fmt.Printf("  STALE %s — was running for %s (timeout %s), marking as failed\n",
+				name, elapsed.Round(time.Second), timeout)
+			db.Exec("UPDATE cron_jobs SET running_since = NULL, last_status = ? WHERE name = ?",
+				"failed:stale", name)
+			db.Exec("INSERT INTO job_runs (name, run_at, status, exit_code, duration_s) VALUES (?, ?, ?, ?, ?)",
+				name, runningSince.String, "failed:stale", -3, elapsed.Seconds())
+		} else if !job.Adhoc {
+			// Non-adhoc but within timeout — still stale since we hold the lock
+			db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ?", name)
 		}
 	}
 }
