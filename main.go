@@ -428,7 +428,7 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 		return
 	}
 
-	ts := db.NowUTC().Format("2006-01-02 15:04:05 UTC")
+	ts := display.FormatTimestamp(db.NowUTC())
 	sep := strings.Repeat("=", 70)
 	fmt.Printf("%s\n  Dispatcher — %s\n  Due: %s\n%s\n\n", sep, ts, strings.Join(due, ", "), sep)
 

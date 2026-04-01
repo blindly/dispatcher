@@ -12,6 +12,7 @@ import (
 
 	"github.com/blindly/dispatcher/internal/config"
 	"github.com/blindly/dispatcher/internal/db"
+	"github.com/blindly/dispatcher/internal/display"
 )
 
 func writeJobLog(name string, content string) {
@@ -107,7 +108,7 @@ func RunOnce(job *config.JobConfig, extraArgs []string, extraEnv []string) (int,
 
 func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []string) (int, float64, string) {
 	now := db.NowUTC()
-	ts := now.Format("2006-01-02 15:04:05 UTC")
+	ts := display.FormatTimestamp(now)
 	header := fmt.Sprintf("[%s] START %s — %s\n", ts, job.Name, job.Description)
 	fmt.Print(header)
 

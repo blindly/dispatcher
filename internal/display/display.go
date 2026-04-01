@@ -33,6 +33,13 @@ func SetTimezone(tzName string) {
 	}
 }
 
+func FormatTimestamp(t time.Time) string {
+	if displayLoc != nil {
+		t = t.In(displayLoc)
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
 func FormatDt(iso string) string {
 	if iso == "" {
 		return "-"
