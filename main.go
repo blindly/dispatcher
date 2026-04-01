@@ -34,6 +34,7 @@ Commands:
   run-once     Run a job without DB tracking
   run-all      Force-run all jobs
   reset        Reset a job's next_run to now
+  retry-failed Reset all failed jobs to run next cycle
   purge        Delete old run history (default: retention config)
   validate     Check config syntax
   logs         Show recent log output for a job
@@ -315,6 +316,33 @@ func main() {
 
 	if cmd == "status" {
 		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir)
+		return
+	}
+
+	if cmd == "retry-failed" {
+		now := db.NowUTC().Format(time.RFC3339)
+		rows, err := conn.Query("SELECT name FROM cron_jobs WHERE last_status LIKE 'failed%'")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		var reset []string
+		for rows.Next() {
+			var name string
+			rows.Scan(&name)
+			if _, ok := cfg.Jobs[name]; ok {
+				reset = append(reset, name)
+			}
+		}
+		rows.Close()
+		if len(reset) == 0 {
+			fmt.Println("No failed jobs to retry")
+			return
+		}
+		for _, name := range reset {
+			conn.Exec("UPDATE cron_jobs SET next_run_at = ? WHERE name = ?", now, name)
+		}
+		fmt.Printf("Reset %d failed jobs: %s\n", len(reset), strings.Join(reset, ", "))
 		return
 	}
 
