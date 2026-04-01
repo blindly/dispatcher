@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/blindly/dispatcher/internal/config"
@@ -114,6 +116,16 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 
 	db.MarkRunning(conn, job.Name)
 	defer db.ClearRunning(conn, job.Name)
+
+	// Handle Ctrl+C — clear running state before exit
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		db.ClearRunning(conn, job.Name)
+		os.Exit(130)
+	}()
+	defer signal.Stop(sigCh)
 
 	start := time.Now()
 	rc, output := RunOnce(job, extraArgs, extraEnv)
