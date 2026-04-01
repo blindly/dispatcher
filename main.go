@@ -286,7 +286,6 @@ func main() {
 	defer conn.Close()
 
 	db.EnsureJobs(conn, cfg.Jobs)
-	db.ClearAllRunning(conn)
 	display.SetTimezone(cfg.Timezone)
 
 	// Read-only: no lock needed
@@ -363,6 +362,9 @@ func main() {
 		return
 	}
 	defer releaseLock(lockFd, configDir)
+
+	// We hold the lock — any non-adhoc running_since is stale from a crashed run
+	db.ClearStaleRunning(conn, cfg.Jobs)
 
 	switch cmd {
 	case "run":
