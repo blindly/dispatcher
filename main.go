@@ -286,6 +286,7 @@ func main() {
 	defer conn.Close()
 
 	db.EnsureJobs(conn, cfg.Jobs)
+	db.ClearAllRunning(conn)
 	display.SetTimezone(cfg.Timezone)
 
 	// Read-only: no lock needed

@@ -49,6 +49,10 @@ func Open(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
+func ClearAllRunning(db *sql.DB) {
+	db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE running_since IS NOT NULL")
+}
+
 func MarkRunning(db *sql.DB, name string) {
 	now := NowUTC().Format(time.RFC3339)
 	db.Exec("UPDATE cron_jobs SET running_since = ? WHERE name = ?", now, name)
