@@ -287,6 +287,7 @@ func main() {
 
 	db.EnsureJobs(conn, cfg.Jobs)
 	display.SetTimezone(cfg.Timezone)
+	runner.SetLogDir(configDir)
 
 	// Read-only: no lock needed
 	if cmd == "list" {

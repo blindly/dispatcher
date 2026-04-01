@@ -17,16 +17,30 @@ import (
 	"github.com/blindly/dispatcher/internal/display"
 )
 
-func writeJobLog(name string, content string) {
+var logBaseDir string
+
+func SetLogDir(dir string) {
+	logBaseDir = dir
+}
+
+func openJobLog(name string) *os.File {
 	logDir := "logs"
+	if logBaseDir != "" {
+		logDir = filepath.Join(logBaseDir, "logs")
+	}
 	os.MkdirAll(logDir, 0755)
 	logPath := filepath.Join(logDir, name+".log")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return
+		return nil
 	}
-	defer f.Close()
-	f.WriteString(content)
+	return f
+}
+
+func writeLog(f *os.File, content string) {
+	if f != nil {
+		f.WriteString(content)
+	}
 }
 
 func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []string, extraEnv []string) (int, string) {
@@ -114,6 +128,12 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	header := fmt.Sprintf("[%s] START %s — %s\n", ts, job.Name, job.Description)
 	fmt.Print(header)
 
+	logFile := openJobLog(job.Name)
+	if logFile != nil {
+		defer logFile.Close()
+	}
+	writeLog(logFile, header)
+
 	db.MarkRunning(conn, job.Name)
 	defer db.ClearRunning(conn, job.Name)
 
@@ -129,14 +149,17 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 
 	start := time.Now()
 	rc, output := RunOnce(job, extraArgs, extraEnv)
+	writeLog(logFile, output)
 
 	attempt := 1
 	for rc != 0 && rc != -1 && attempt <= job.Retries {
 		retryMsg := fmt.Sprintf("  [RETRY %d/%d] %s failed (rc=%d), retrying in %ds...\n",
 			attempt, job.Retries, job.Name, rc, job.RetryDelay)
 		fmt.Print(retryMsg)
+		writeLog(logFile, retryMsg)
 		time.Sleep(time.Duration(job.RetryDelay) * time.Second)
 		rc, output = RunOnce(job, extraArgs, extraEnv)
+		writeLog(logFile, output)
 		attempt++
 	}
 
@@ -160,10 +183,9 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	} else if attempt > 1 {
 		icon = fmt.Sprintf("OK (retry %d)", attempt-1)
 	}
-	footer := fmt.Sprintf("  [%s] %s (%.1fs)\n", icon, job.Name, elapsed)
+	footer := fmt.Sprintf("  [%s] %s (%.1fs)\n\n", icon, job.Name, elapsed)
 	fmt.Print(footer)
-
-	writeJobLog(job.Name, header+output+footer+"\n")
+	writeLog(logFile, footer)
 
 	return rc, elapsed, output
 }
