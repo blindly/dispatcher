@@ -34,6 +34,7 @@ Commands:
   run-once     Run a job without DB tracking
   run-all      Force-run all jobs
   reset        Reset a job's next_run to now
+  purge        Delete old run history (default: retention config)
   validate     Check config syntax
   logs         Show recent log output for a job
   watch        Live tail of job logs (all or specific job)
@@ -390,6 +391,26 @@ func main() {
 			}
 		}
 
+	case "purge":
+		days := cfg.Retention
+		if len(args) > 0 {
+			purgeInterval, err := config.ParseInterval(args[0])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid duration: %v\n", err)
+				os.Exit(1)
+			}
+			days = purgeInterval / 86400
+			if days < 1 {
+				days = 1
+			}
+		}
+		deleted, err := db.PurgeHistory(conn, days)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Purge failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Purged %d history entries older than %dd\n", deleted, days)
+
 	case "":
 		dispatch(conn, cfg)
 
@@ -446,6 +467,9 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 	fmt.Printf("%s\n  Done: %d ok, %d failed, %.1fs total\n%s\n", sep, passed, failed, totalTime, sep)
 
 	notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+
+	// Auto-purge old history
+	db.PurgeHistory(conn, cfg.Retention)
 }
 
 func showDocs() {

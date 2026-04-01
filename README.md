@@ -66,6 +66,7 @@ Create a `dispatcher.yaml` (or run `dispatch init`):
 ```yaml
 timezone: America/New_York
 schedule: "*/5 * * * *"   # how often cron checks for due jobs (default: */5)
+retention: 90d              # how long to keep run history (default: 90d)
 
 vars:
   BACKUP_DIR: /var/backups/myapp
@@ -246,6 +247,8 @@ dispatch watch           # live tail all job logs
 dispatch watch <job>     # live tail a specific job
 dispatch history <job>   # show last 20 runs for a job
 dispatch analytics       # job success rates and run history
+dispatch purge           # delete old run history (uses retention config)
+dispatch purge 30d       # delete history older than 30 days
 dispatch validate        # check config syntax
 dispatch init            # create default config
 dispatch install         # add crontab entry (default: */5 * * * *)

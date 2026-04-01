@@ -35,9 +35,10 @@ type DispatcherConfig struct {
 	Timezone string            `yaml:"timezone"`
 	Notify   NotifyConfig      `yaml:"notify"`
 	Jobs     map[string]*JobConfig
-	DbPath   string            `yaml:"db_path"`
-	Schedule string            `yaml:"schedule"`
-	Vars     map[string]string `yaml:"vars"`
+	DbPath    string            `yaml:"db_path"`
+	Schedule  string            `yaml:"schedule"`
+	Retention int               `yaml:"-"` // days, parsed from retention
+	Vars      map[string]string `yaml:"vars"`
 }
 
 // stringOrList handles YAML values that can be either a string or list of strings.
@@ -75,6 +76,7 @@ type rawConfig struct {
 	Jobs           map[string]rawJob `yaml:"jobs"`
 	DbPath         string            `yaml:"db_path"`
 	Schedule       string            `yaml:"schedule"`
+	Retention      string            `yaml:"retention"`
 	DiscordWebhook string            `yaml:"discord_webhook"`
 	Vars           map[string]string `yaml:"vars"`
 }
@@ -166,13 +168,26 @@ func Load(path string) (*DispatcherConfig, error) {
 		schedule = "*/5 * * * *"
 	}
 
+	retention := 90 // default 90 days
+	if raw.Retention != "" {
+		retSec, err := ParseInterval(raw.Retention)
+		if err != nil {
+			return nil, fmt.Errorf("retention: %w", err)
+		}
+		retention = retSec / 86400 // convert to days
+		if retention < 1 {
+			retention = 1
+		}
+	}
+
 	cfg := &DispatcherConfig{
-		Timezone: raw.Timezone,
-		Notify:   raw.Notify,
-		Jobs:     make(map[string]*JobConfig),
-		DbPath:   raw.DbPath,
-		Schedule: schedule,
-		Vars:     vars,
+		Timezone:  raw.Timezone,
+		Notify:    raw.Notify,
+		Jobs:      make(map[string]*JobConfig),
+		DbPath:    raw.DbPath,
+		Schedule:  schedule,
+		Retention: retention,
+		Vars:      vars,
 	}
 
 	if cfg.Notify.Discord.Webhook == "" && raw.DiscordWebhook != "" {

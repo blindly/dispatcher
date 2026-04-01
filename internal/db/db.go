@@ -239,3 +239,12 @@ func GetHistory(db *sql.DB, name string, limit int) ([]HistoryEntry, error) {
 	}
 	return entries, nil
 }
+
+func PurgeHistory(db *sql.DB, retentionDays int) (int64, error) {
+	cutoff := NowUTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
+	result, err := db.Exec("DELETE FROM job_runs WHERE run_at < ?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

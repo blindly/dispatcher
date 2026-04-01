@@ -516,3 +516,44 @@ jobs:
 		t.Errorf("schedule = %q, want */1 * * * *", cfg.Schedule)
 	}
 }
+
+func TestLoad_RetentionDefault(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retention != 90 {
+		t.Errorf("retention = %d, want 90", cfg.Retention)
+	}
+}
+
+func TestLoad_RetentionCustom(t *testing.T) {
+	yaml := `
+retention: 30d
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retention != 30 {
+		t.Errorf("retention = %d, want 30", cfg.Retention)
+	}
+}

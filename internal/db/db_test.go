@@ -250,3 +250,38 @@ func TestGetHistory_Empty(t *testing.T) {
 		t.Errorf("got %d entries, want 0", len(entries))
 	}
 }
+
+func TestPurgeHistory(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	now := NowUTC().Format(time.RFC3339)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "purge_test", now)
+
+	// Insert an old run (100 days ago)
+	old := NowUTC().AddDate(0, 0, -100).Format(time.RFC3339)
+	conn.Exec("INSERT INTO job_runs (name, run_at, status, exit_code, duration_s) VALUES (?, ?, ?, ?, ?)",
+		"purge_test", old, "ok", 0, 1.0)
+
+	// Insert a recent run
+	UpdateAfterRun(conn, "purge_test", 300, 0, 1.0, "ok")
+
+	// Purge older than 90 days
+	deleted, err := PurgeHistory(conn, 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1", deleted)
+	}
+
+	// Recent run should still be there
+	entries, _ := GetHistory(conn, "purge_test", 10)
+	if len(entries) != 1 {
+		t.Errorf("remaining = %d, want 1", len(entries))
+	}
+}
