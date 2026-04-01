@@ -136,6 +136,67 @@ func TestRunOnce_ExtraEnv(t *testing.T) {
 	}
 }
 
+func TestRunOnce_Dir(t *testing.T) {
+	dir := t.TempDir()
+	job := &config.JobConfig{
+		Name:     "dir_test",
+		Commands: []string{"pwd"},
+		Dir:      dir,
+	}
+	rc, output := RunOnce(job, nil, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, dir) {
+		t.Errorf("output = %q, want to contain %q", output, dir)
+	}
+}
+
+func TestRunOnce_JobEnv(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "env_test",
+		Commands: []string{"env"},
+		Env:      map[string]string{"JOB_VAR": "from_config"},
+	}
+	rc, output := RunOnce(job, nil, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "JOB_VAR=from_config") {
+		t.Errorf("output missing JOB_VAR: %q", output)
+	}
+}
+
+func TestRunOnce_Shell(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "shell_test",
+		Commands: []string{"echo $((1 + 2))"},
+		Shell:    "/bin/bash",
+	}
+	rc, output := RunOnce(job, nil, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "3") {
+		t.Errorf("output = %q, want to contain '3'", output)
+	}
+}
+
+func TestRunOnce_ShellWithExtraArgs(t *testing.T) {
+	job := &config.JobConfig{
+		Name:     "shell_args_test",
+		Commands: []string{"echo hello"},
+		Shell:    "/bin/bash",
+	}
+	rc, output := RunOnce(job, []string{"world"}, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "hello world") {
+		t.Errorf("output = %q, want 'hello world'", output)
+	}
+}
+
 func TestRunOnce_CLIArgsTemplate(t *testing.T) {
 	job := &config.JobConfig{
 		Name:     "cli_args_test",

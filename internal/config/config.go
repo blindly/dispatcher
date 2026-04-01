@@ -12,15 +12,18 @@ import (
 
 type JobConfig struct {
 	Name            string
-	Commands        []string // one or more commands to run in sequence
+	Commands        []string          // one or more commands to run in sequence
 	IntervalSeconds int
-	Description     string  `yaml:"description"`
-	ActiveHours     *[2]int `yaml:"-"`
-	DependsOn       string  `yaml:"depends_on"`
-	Retries         int     `yaml:"retries"`
-	RetryDelay      int     `yaml:"-"` // seconds, parsed from retry_delay
-	Timeout         int     `yaml:"-"` // seconds, parsed from timeout
+	Description     string            `yaml:"description"`
+	ActiveHours     *[2]int           `yaml:"-"`
+	DependsOn       string            `yaml:"depends_on"`
+	Retries         int               `yaml:"retries"`
+	RetryDelay      int               `yaml:"-"` // seconds, parsed from retry_delay
+	Timeout         int               `yaml:"-"` // seconds, parsed from timeout
 	Adhoc           bool
+	Dir             string            `yaml:"dir"`
+	Env             map[string]string `yaml:"env"`
+	Shell           string            `yaml:"shell"`
 }
 
 type DiscordConfig struct {
@@ -59,15 +62,18 @@ func (s *stringOrList) UnmarshalYAML(value *yaml.Node) error {
 
 // rawJob is the intermediate YAML structure before parsing.
 type rawJob struct {
-	Command     stringOrList `yaml:"command"`
-	Interval    string       `yaml:"interval"`
-	Description string `yaml:"description"`
-	ActiveHours []int  `yaml:"active_hours"`
-	DependsOn   string `yaml:"depends_on"`
-	Retries     *int   `yaml:"retries"`
-	RetryDelay  string `yaml:"retry_delay"`
-	Timeout     string `yaml:"timeout"`
-	Adhoc       bool   `yaml:"adhoc"`
+	Command     stringOrList      `yaml:"command"`
+	Interval    string            `yaml:"interval"`
+	Description string            `yaml:"description"`
+	ActiveHours []int             `yaml:"active_hours"`
+	DependsOn   string            `yaml:"depends_on"`
+	Retries     *int              `yaml:"retries"`
+	RetryDelay  string            `yaml:"retry_delay"`
+	Timeout     string            `yaml:"timeout"`
+	Adhoc       bool              `yaml:"adhoc"`
+	Dir         string            `yaml:"dir"`
+	Env         map[string]string `yaml:"env"`
+	Shell       string            `yaml:"shell"`
 }
 
 type rawConfig struct {
@@ -224,6 +230,9 @@ func Load(path string) (*DispatcherConfig, error) {
 			Retries:         2, // default
 			RetryDelay:      5, // default 5s
 			Adhoc:           rj.Adhoc,
+			Dir:             rj.Dir,
+			Env:             rj.Env,
+			Shell:           rj.Shell,
 		}
 
 		if rj.Retries != nil {

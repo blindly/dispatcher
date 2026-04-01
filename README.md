@@ -132,6 +132,9 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `retry_delay` | no | `5s` | Delay between retries |
 | `timeout` | no | `600s` | Max time before killing the job |
 | `adhoc` | no | `false` | If true, only runs manually (skipped by scheduler) |
+| `dir` | no | | Working directory for the command |
+| `env` | no | | Environment variables (key-value map) |
+| `shell` | no | | Shell to use (e.g. `/bin/bash`, `powershell`) |
 
 \* `interval` is not required when `adhoc: true`.
 
@@ -146,6 +149,26 @@ API_KEY=your-secret-key
 Config-level variables use `{{.VAR_NAME}}` syntax from the `vars` section — use these for paths, binaries, and other reusable non-secret values.
 
 Config file auto-detection checks: `dispatcher.yaml`, `dispatcher.yml`, `Dispatcher.yaml`, `Dispatcher.yml`.
+
+### Directory, environment, and shell
+
+Jobs can specify a working directory, environment variables, and shell:
+
+```yaml
+jobs:
+  deploy:
+    command: ./deploy.sh
+    dir: /opt/myapp
+    shell: /bin/bash
+    env:
+      NODE_ENV: production
+      LOG_LEVEL: info
+    adhoc: true
+```
+
+Without `shell`, commands are executed directly (split by whitespace). With `shell`, the full command string is passed to the shell via `-c`, which enables pipes, redirects, and shell syntax.
+
+Job-level `env` is merged with the process environment and any `.env` file. CLI `KEY=VALUE` args take highest priority.
 
 ### Multiple commands
 

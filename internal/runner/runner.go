@@ -26,16 +26,39 @@ func writeJobLog(name string, content string) {
 	f.WriteString(content)
 }
 
-func runCommand(command string, timeout int, extraArgs []string, extraEnv []string) (int, string) {
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return -2, "empty command"
-	}
-	parts = append(parts, extraArgs...)
+func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []string, extraEnv []string) (int, string) {
+	var cmd *exec.Cmd
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	cmd.Env = append(os.Environ(), extraEnv...)
+
+	if job.Shell != "" {
+		// Use specified shell
+		fullCmd := command
+		if len(extraArgs) > 0 {
+			fullCmd += " " + strings.Join(extraArgs, " ")
+		}
+		cmd = exec.CommandContext(ctx, job.Shell, "-c", fullCmd)
+	} else {
+		parts := strings.Fields(command)
+		if len(parts) == 0 {
+			return -2, "empty command"
+		}
+		parts = append(parts, extraArgs...)
+		cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
+	}
+
+	// Build environment: os env + job env + extra env
+	env := os.Environ()
+	for k, v := range job.Env {
+		env = append(env, k+"="+v)
+	}
+	env = append(env, extraEnv...)
+	cmd.Env = env
+
+	if job.Dir != "" {
+		cmd.Dir = job.Dir
+	}
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -66,13 +89,13 @@ func RunOnce(job *config.JobConfig, extraArgs []string, extraEnv []string) (int,
 		// If command uses {{.CLI_ARGS}}, substitute inline; otherwise append extraArgs
 		if strings.Contains(command, "{{.CLI_ARGS}}") {
 			command = strings.ReplaceAll(command, "{{.CLI_ARGS}}", cliArgs)
-			rc, output := runCommand(command, timeout, nil, extraEnv)
+			rc, output := runCommand(command, job, timeout, nil, extraEnv)
 			allOutput.WriteString(output)
 			if rc != 0 {
 				return rc, allOutput.String()
 			}
 		} else {
-			rc, output := runCommand(command, timeout, extraArgs, extraEnv)
+			rc, output := runCommand(command, job, timeout, extraArgs, extraEnv)
 			allOutput.WriteString(output)
 			if rc != 0 {
 				return rc, allOutput.String()
