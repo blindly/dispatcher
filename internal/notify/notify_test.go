@@ -78,7 +78,7 @@ func TestSendNtfySummary_AllPass(t *testing.T) {
 	results := []JobResult{
 		{Name: "job1", ExitCode: 0, Elapsed: 1.5, Output: "ok"},
 	}
-	SendNtfySummary(results, server.URL, "", "")
+	SendNtfySummary(results, server.URL, "", "", "")
 
 	if gotTitle != "Dispatcher: 1 ok, 0 failed (2s)" {
 		t.Errorf("title = %q", gotTitle)
@@ -106,7 +106,7 @@ func TestSendNtfySummary_WithFailures(t *testing.T) {
 	results := []JobResult{
 		{Name: "job1", ExitCode: 1, Elapsed: 2.0, Output: "error"},
 	}
-	SendNtfySummary(results, server.URL, "", "")
+	SendNtfySummary(results, server.URL, "", "", "")
 
 	if gotPriority != "high" {
 		t.Errorf("priority = %q, want high", gotPriority)
@@ -125,15 +125,31 @@ func TestSendNtfySummary_WithTopic(t *testing.T) {
 	defer server.Close()
 
 	results := []JobResult{{Name: "job1", ExitCode: 0, Elapsed: 1.0, Output: "ok"}}
-	SendNtfySummary(results, server.URL, "my-dispatch", "")
+	SendNtfySummary(results, server.URL, "my-dispatch", "", "")
 
 	if gotPath != "/my-dispatch" {
 		t.Errorf("path = %q, want /my-dispatch", gotPath)
 	}
 }
 
+func TestSendNtfySummary_WithToken(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	results := []JobResult{{Name: "job1", ExitCode: 0, Elapsed: 1.0, Output: "ok"}}
+	SendNtfySummary(results, server.URL, "", "tk_mytoken123", "")
+
+	if gotAuth != "Bearer tk_mytoken123" {
+		t.Errorf("auth = %q, want Bearer tk_mytoken123", gotAuth)
+	}
+}
+
 func TestSendNtfySummary_NoURL(t *testing.T) {
 	// Should not panic
 	results := []JobResult{{Name: "job1", ExitCode: 0, Elapsed: 1.0, Output: "ok"}}
-	SendNtfySummary(results, "", "", "")
+	SendNtfySummary(results, "", "", "", "")
 }

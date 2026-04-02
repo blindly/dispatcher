@@ -13,12 +13,13 @@ type NotifyConfig struct {
 	DiscordWebhook string
 	NtfyURL        string
 	NtfyTopic      string
+	NtfyToken      string
 	NtfyPriority   string
 }
 
 func SendAll(results []JobResult, cfg NotifyConfig) {
 	SendDiscordSummary(results, cfg.DiscordWebhook)
-	SendNtfySummary(results, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyPriority)
+	SendNtfySummary(results, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority)
 }
 
 type JobResult struct {
@@ -131,7 +132,7 @@ func SendDiscordSummary(results []JobResult, webhookURL string) {
 	resp.Body.Close()
 }
 
-func SendNtfySummary(results []JobResult, ntfyURL string, topic string, priority string) {
+func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token string, priority string) {
 	if len(results) == 0 || (ntfyURL == "" && topic == "") {
 		return
 	}
@@ -193,6 +194,9 @@ func SendNtfySummary(results []JobResult, ntfyURL string, topic string, priority
 	req.Header.Set("Title", title)
 	req.Header.Set("Priority", priority)
 	req.Header.Set("Tags", tags)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

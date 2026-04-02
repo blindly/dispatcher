@@ -33,6 +33,7 @@ type DiscordConfig struct {
 type NtfyConfig struct {
 	URL      string `yaml:"url"`
 	Topic    string `yaml:"topic"`
+	Token    string `yaml:"token"`
 	Priority string `yaml:"priority"`
 }
 

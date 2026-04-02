@@ -298,6 +298,7 @@ func main() {
 		DiscordWebhook: cfg.Notify.Discord.Webhook,
 		NtfyURL:        cfg.Notify.Ntfy.URL,
 		NtfyTopic:      cfg.Notify.Ntfy.Topic,
+		NtfyToken:      cfg.Notify.Ntfy.Token,
 		NtfyPriority:   cfg.Notify.Ntfy.Priority,
 	}
 
