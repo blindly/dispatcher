@@ -73,11 +73,13 @@ vars:
   S3_BUCKET: s3://myapp-backups
 
 notify:
+  on: failure                       # "always" (default) or "failure"
   discord:
     webhook: ${DISCORD_WEBHOOK_URL}
   # ntfy:
   #   url: https://ntfy.sh
   #   topic: my-dispatch
+  #   token: ${NTFY_TOKEN}
 
 jobs:
   db-backup:
