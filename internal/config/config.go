@@ -38,6 +38,7 @@ type NtfyConfig struct {
 }
 
 type NotifyConfig struct {
+	On      string        `yaml:"on"` // "always" (default) or "failure"
 	Discord DiscordConfig `yaml:"discord"`
 	Ntfy    NtfyConfig    `yaml:"ntfy"`
 }

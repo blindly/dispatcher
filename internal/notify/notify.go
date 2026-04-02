@@ -10,6 +10,7 @@ import (
 )
 
 type NotifyConfig struct {
+	On             string // "always" or "failure"
 	DiscordWebhook string
 	NtfyURL        string
 	NtfyTopic      string
@@ -18,6 +19,18 @@ type NotifyConfig struct {
 }
 
 func SendAll(results []JobResult, cfg NotifyConfig) {
+	if cfg.On == "failure" {
+		hasFail := false
+		for _, r := range results {
+			if r.ExitCode != 0 {
+				hasFail = true
+				break
+			}
+		}
+		if !hasFail {
+			return
+		}
+	}
 	SendDiscordSummary(results, cfg.DiscordWebhook)
 	SendNtfySummary(results, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority)
 }

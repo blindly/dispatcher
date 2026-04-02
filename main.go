@@ -294,7 +294,12 @@ func main() {
 	display.SetTimezone(cfg.Timezone)
 	runner.SetLogDir(configDir)
 
+	notifyOn := cfg.Notify.On
+	if notifyOn == "" {
+		notifyOn = "always"
+	}
 	notifyCfg := notify.NotifyConfig{
+		On:             notifyOn,
 		DiscordWebhook: cfg.Notify.Discord.Webhook,
 		NtfyURL:        cfg.Notify.Ntfy.URL,
 		NtfyTopic:      cfg.Notify.Ntfy.Topic,
