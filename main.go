@@ -81,10 +81,14 @@ func initConfig() {
 
 	defaultConfig := `timezone: America/New_York
 # schedule: "*/5 * * * *"
+# retention: 90d
 
 # notify:
 #   discord:
 #     webhook: ${DISCORD_WEBHOOK_URL}
+#   ntfy:
+#     url: https://ntfy.sh
+#     topic: my-dispatch
 
 jobs:
   hello:
