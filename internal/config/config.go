@@ -25,6 +25,7 @@ type JobConfig struct {
 	Env             map[string]string `yaml:"env"`
 	Shell           string            `yaml:"shell"`
 	Notify          string            `yaml:"notify"` // "always", "failure", or "" (inherit global)
+	Paused          bool              `yaml:"paused"`
 }
 
 type DiscordConfig struct {

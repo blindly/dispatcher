@@ -425,7 +425,7 @@ func main() {
 	case "run-all":
 		var results []notify.JobResult
 		for name, job := range cfg.Jobs {
-			if job.Adhoc {
+			if job.Adhoc || job.Paused {
 				continue
 			}
 			rc, elapsed, output := runner.RunJob(conn, job, nil, nil)

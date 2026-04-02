@@ -116,7 +116,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		totalRuns += runs
 		totalFails += fails
 
-		if !job.Adhoc && nextRun <= now.Format(time.RFC3339) {
+		if !job.Adhoc && !job.Paused && nextRun <= now.Format(time.RFC3339) {
 			if db.IsInActiveHours(job.ActiveHours, tzName) {
 				dueCount++
 			}
@@ -231,13 +231,15 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 			}
 			nr := FormatDt(r.nextRun.String)
 			st := "-"
-			if running := formatRunning(r.runningSince, now); running != "" {
+			if job.Paused {
+				st = "paused"
+			} else if running := formatRunning(r.runningSince, now); running != "" {
 				st = running
 			} else if r.status.Valid {
 				st = r.status.String
 			}
 			isDue := ""
-			if r.nextRun.Valid && r.nextRun.String <= now.Format(time.RFC3339) {
+			if !job.Paused && r.nextRun.Valid && r.nextRun.String <= now.Format(time.RFC3339) {
 				isDue = "YES"
 			}
 			active := "always"
