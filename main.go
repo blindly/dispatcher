@@ -374,9 +374,7 @@ func main() {
 		}
 		if job.Adhoc {
 			extraEnv, extraArgs := parseJobArgs(args[1:])
-			rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
-			results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output}}
-			notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+			rc, _, _ := runner.RunJob(conn, job, extraArgs, extraEnv)
 			if rc != 0 {
 				os.Exit(1)
 			}
