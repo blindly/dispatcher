@@ -19,9 +19,15 @@ type NotifyConfig struct {
 }
 
 func SendAll(results []JobResult, cfg NotifyConfig) {
-	// Filter results based on global and per-job notify policy
-	var filtered []JobResult
+	// Separate output-mode jobs from summary jobs
+	var summary []JobResult
+	var outputJobs []JobResult
+
 	for _, r := range results {
+		if r.Notify == "output" {
+			outputJobs = append(outputJobs, r)
+			continue
+		}
 		policy := cfg.On
 		if r.Notify != "" {
 			policy = r.Notify
@@ -29,13 +35,19 @@ func SendAll(results []JobResult, cfg NotifyConfig) {
 		if policy == "failure" && r.ExitCode == 0 {
 			continue
 		}
-		filtered = append(filtered, r)
+		summary = append(summary, r)
 	}
-	if len(filtered) == 0 {
-		return
+
+	// Send summary notification for regular jobs
+	if len(summary) > 0 {
+		SendDiscordSummary(summary, cfg.DiscordWebhook)
+		SendNtfySummary(summary, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority)
 	}
-	SendDiscordSummary(filtered, cfg.DiscordWebhook)
-	SendNtfySummary(filtered, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority)
+
+	// Send individual output notifications
+	for _, r := range outputJobs {
+		sendOutputNotification(r, cfg)
+	}
 }
 
 type JobResult struct {
@@ -219,6 +231,84 @@ func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token st
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("  ntfy notification failed: %v\n", err)
+		return
+	}
+	resp.Body.Close()
+}
+
+func sendOutputNotification(r JobResult, cfg NotifyConfig) {
+	output := strings.TrimSpace(r.Output)
+	if output == "" {
+		output = "(no output)"
+	}
+
+	icon := "ok"
+	if r.ExitCode != 0 {
+		icon = "FAIL"
+	}
+	title := fmt.Sprintf("[%s] %s", icon, r.Name)
+
+	// Discord
+	if cfg.DiscordWebhook != "" {
+		description := output
+		if len(description) > 3900 {
+			description = description[:3900] + "\n..."
+		}
+		color := 0x4A9EFF // blue for output
+		if r.ExitCode != 0 {
+			color = 0xFF0000
+		}
+		payload := map[string]interface{}{
+			"embeds": []map[string]interface{}{
+				{
+					"title":       title,
+					"color":       color,
+					"description": "```\n" + description + "\n```",
+					"timestamp":   time.Now().UTC().Format(time.RFC3339),
+				},
+			},
+		}
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Post(cfg.DiscordWebhook, "application/json", bytes.NewReader(body))
+		if err != nil {
+			fmt.Printf("  Discord output notification failed: %v\n", err)
+			return
+		}
+		resp.Body.Close()
+	}
+
+	// ntfy
+	ntfyURL := cfg.NtfyURL
+	if ntfyURL == "" && cfg.NtfyTopic == "" {
+		return
+	}
+	if ntfyURL == "" {
+		ntfyURL = "https://ntfy.sh"
+	}
+	if cfg.NtfyTopic != "" {
+		ntfyURL = strings.TrimRight(ntfyURL, "/") + "/" + cfg.NtfyTopic
+	}
+
+	req, err := http.NewRequest("POST", ntfyURL, strings.NewReader(output))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Title", title)
+	if r.ExitCode != 0 {
+		req.Header.Set("Priority", "high")
+		req.Header.Set("Tags", "x")
+	}
+	if cfg.NtfyToken != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.NtfyToken)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("  ntfy output notification failed: %v\n", err)
 		return
 	}
 	resp.Body.Close()
