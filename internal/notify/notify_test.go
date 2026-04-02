@@ -62,3 +62,78 @@ func TestSendDiscordSummary_NoWebhook(t *testing.T) {
 func TestSendDiscordSummary_NoResults(t *testing.T) {
 	SendDiscordSummary(nil, "https://example.com")
 }
+
+func TestSendNtfySummary_AllPass(t *testing.T) {
+	var gotTitle, gotPriority, gotTags, gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTitle = r.Header.Get("Title")
+		gotPriority = r.Header.Get("Priority")
+		gotTags = r.Header.Get("Tags")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	results := []JobResult{
+		{Name: "job1", ExitCode: 0, Elapsed: 1.5, Output: "ok"},
+	}
+	SendNtfySummary(results, server.URL, "", "")
+
+	if gotTitle != "Dispatcher: 1 ok, 0 failed (2s)" {
+		t.Errorf("title = %q", gotTitle)
+	}
+	if gotPriority != "default" {
+		t.Errorf("priority = %q, want default", gotPriority)
+	}
+	if gotTags != "white_check_mark" {
+		t.Errorf("tags = %q", gotTags)
+	}
+	if gotBody == "" {
+		t.Error("body is empty")
+	}
+}
+
+func TestSendNtfySummary_WithFailures(t *testing.T) {
+	var gotPriority, gotTags string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPriority = r.Header.Get("Priority")
+		gotTags = r.Header.Get("Tags")
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	results := []JobResult{
+		{Name: "job1", ExitCode: 1, Elapsed: 2.0, Output: "error"},
+	}
+	SendNtfySummary(results, server.URL, "", "")
+
+	if gotPriority != "high" {
+		t.Errorf("priority = %q, want high", gotPriority)
+	}
+	if gotTags != "x" {
+		t.Errorf("tags = %q, want x", gotTags)
+	}
+}
+
+func TestSendNtfySummary_WithTopic(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	results := []JobResult{{Name: "job1", ExitCode: 0, Elapsed: 1.0, Output: "ok"}}
+	SendNtfySummary(results, server.URL, "my-dispatch", "")
+
+	if gotPath != "/my-dispatch" {
+		t.Errorf("path = %q, want /my-dispatch", gotPath)
+	}
+}
+
+func TestSendNtfySummary_NoURL(t *testing.T) {
+	// Should not panic
+	results := []JobResult{{Name: "job1", ExitCode: 0, Elapsed: 1.0, Output: "ok"}}
+	SendNtfySummary(results, "", "", "")
+}

@@ -30,8 +30,15 @@ type DiscordConfig struct {
 	Webhook string `yaml:"webhook"`
 }
 
+type NtfyConfig struct {
+	URL      string `yaml:"url"`
+	Topic    string `yaml:"topic"`
+	Priority string `yaml:"priority"`
+}
+
 type NotifyConfig struct {
 	Discord DiscordConfig `yaml:"discord"`
+	Ntfy    NtfyConfig    `yaml:"ntfy"`
 }
 
 type DispatcherConfig struct {

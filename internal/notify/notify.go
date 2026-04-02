@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+type NotifyConfig struct {
+	DiscordWebhook string
+	NtfyURL        string
+	NtfyTopic      string
+	NtfyPriority   string
+}
+
+func SendAll(results []JobResult, cfg NotifyConfig) {
+	SendDiscordSummary(results, cfg.DiscordWebhook)
+	SendNtfySummary(results, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyPriority)
+}
+
 type JobResult struct {
 	Name     string
 	ExitCode int
@@ -114,6 +126,78 @@ func SendDiscordSummary(results []JobResult, webhookURL string) {
 	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		fmt.Printf("  Discord notification failed: %v\n", err)
+		return
+	}
+	resp.Body.Close()
+}
+
+func SendNtfySummary(results []JobResult, ntfyURL string, topic string, priority string) {
+	if len(results) == 0 || (ntfyURL == "" && topic == "") {
+		return
+	}
+
+	// Build the target URL
+	url := ntfyURL
+	if url == "" {
+		url = "https://ntfy.sh"
+	}
+	if topic != "" {
+		url = strings.TrimRight(url, "/") + "/" + topic
+	}
+
+	passed := 0
+	failed := 0
+	totalTime := 0.0
+	for _, r := range results {
+		if r.ExitCode == 0 {
+			passed++
+		} else {
+			failed++
+		}
+		totalTime += r.Elapsed
+	}
+
+	title := fmt.Sprintf("Dispatcher: %d ok, %d failed (%.0fs)", passed, failed, totalTime)
+
+	var lines []string
+	for _, r := range results {
+		icon := "ok"
+		if r.ExitCode != 0 {
+			icon = "FAIL"
+		}
+		line := fmt.Sprintf("[%s] %s (%.1fs)", icon, r.Name, r.Elapsed)
+		lines = append(lines, line)
+	}
+	body := strings.Join(lines, "\n")
+
+	if priority == "" {
+		if failed > 0 {
+			priority = "high"
+		} else {
+			priority = "default"
+		}
+	}
+
+	tags := "white_check_mark"
+	if failed > 0 && passed > 0 {
+		tags = "warning"
+	} else if failed > 0 {
+		tags = "x"
+	}
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	if err != nil {
+		fmt.Printf("  ntfy notification failed: %v\n", err)
+		return
+	}
+	req.Header.Set("Title", title)
+	req.Header.Set("Priority", priority)
+	req.Header.Set("Tags", tags)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("  ntfy notification failed: %v\n", err)
 		return
 	}
 	resp.Body.Close()

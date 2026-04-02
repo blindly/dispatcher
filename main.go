@@ -290,6 +290,13 @@ func main() {
 	display.SetTimezone(cfg.Timezone)
 	runner.SetLogDir(configDir)
 
+	notifyCfg := notify.NotifyConfig{
+		DiscordWebhook: cfg.Notify.Discord.Webhook,
+		NtfyURL:        cfg.Notify.Ntfy.URL,
+		NtfyTopic:      cfg.Notify.Ntfy.Topic,
+		NtfyPriority:   cfg.Notify.Ntfy.Priority,
+	}
+
 	// Read-only: no lock needed
 	if cmd == "list" {
 		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone)
@@ -400,7 +407,7 @@ func main() {
 		extraEnv, extraArgs := parseJobArgs(args[1:])
 		rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output}}
-		notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+		notify.SendAll(results, notifyCfg)
 		if rc != 0 {
 			os.Exit(1)
 		}
@@ -414,7 +421,7 @@ func main() {
 			rc, elapsed, output := runner.RunJob(conn, job, nil, nil)
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output})
 		}
-		notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+		notify.SendAll(results, notifyCfg)
 		for _, r := range results {
 			if r.ExitCode != 0 {
 				os.Exit(1)
@@ -442,7 +449,7 @@ func main() {
 		fmt.Printf("Purged %d history entries older than %dd\n", deleted, days)
 
 	case "":
-		dispatch(conn, cfg)
+		dispatch(conn, cfg, notifyCfg)
 
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
@@ -451,7 +458,7 @@ func main() {
 	}
 }
 
-func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
+func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.NotifyConfig) {
 	due := db.GetDueJobs(conn, cfg.Jobs, cfg.Timezone)
 	if len(due) == 0 {
 		fmt.Printf("No jobs due (%d jobs configured)\n", len(cfg.Jobs))
@@ -496,7 +503,7 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig) {
 	}
 	fmt.Printf("%s\n  Done: %d ok, %d failed, %.1fs total\n%s\n", sep, passed, failed, totalTime, sep)
 
-	notify.SendDiscordSummary(results, cfg.Notify.Discord.Webhook)
+	notify.SendAll(results, notifyCfg)
 
 	// Auto-purge old history
 	db.PurgeHistory(conn, cfg.Retention)

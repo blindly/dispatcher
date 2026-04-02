@@ -75,6 +75,9 @@ vars:
 notify:
   discord:
     webhook: ${DISCORD_WEBHOOK_URL}
+  # ntfy:
+  #   url: https://ntfy.sh
+  #   topic: my-dispatch
 
 jobs:
   db-backup:
