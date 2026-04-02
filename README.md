@@ -140,6 +140,7 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `dir` | no | | Working directory for the command |
 | `env` | no | | Environment variables (key-value map) |
 | `shell` | no | | Shell to use (e.g. `/bin/bash`, `powershell`) |
+| `notify` | no | | Override global notify policy: `always` or `failure` |
 
 \* `interval` is not required when `adhoc: true`.
 
