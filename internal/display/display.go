@@ -116,7 +116,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		totalRuns += runs
 		totalFails += fails
 
-		if nextRun <= now.Format(time.RFC3339) {
+		if !job.Adhoc && nextRun <= now.Format(time.RFC3339) {
 			if db.IsInActiveHours(job.ActiveHours, tzName) {
 				dueCount++
 			}
