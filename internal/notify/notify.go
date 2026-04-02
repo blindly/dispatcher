@@ -19,20 +19,23 @@ type NotifyConfig struct {
 }
 
 func SendAll(results []JobResult, cfg NotifyConfig) {
-	if cfg.On == "failure" {
-		hasFail := false
-		for _, r := range results {
-			if r.ExitCode != 0 {
-				hasFail = true
-				break
-			}
+	// Filter results based on global and per-job notify policy
+	var filtered []JobResult
+	for _, r := range results {
+		policy := cfg.On
+		if r.Notify != "" {
+			policy = r.Notify
 		}
-		if !hasFail {
-			return
+		if policy == "failure" && r.ExitCode == 0 {
+			continue
 		}
+		filtered = append(filtered, r)
 	}
-	SendDiscordSummary(results, cfg.DiscordWebhook)
-	SendNtfySummary(results, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority)
+	if len(filtered) == 0 {
+		return
+	}
+	SendDiscordSummary(filtered, cfg.DiscordWebhook)
+	SendNtfySummary(filtered, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority)
 }
 
 type JobResult struct {
@@ -40,6 +43,7 @@ type JobResult struct {
 	ExitCode int
 	Elapsed  float64
 	Output   string
+	Notify   string // per-job override: "always", "failure", or ""
 }
 
 func extractSummary(rc int, output string) string {

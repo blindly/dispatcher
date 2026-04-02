@@ -416,7 +416,7 @@ func main() {
 		job := cfg.Jobs[args[0]]
 		extraEnv, extraArgs := parseJobArgs(args[1:])
 		rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
-		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output}}
+		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify}}
 		notify.SendAll(results, notifyCfg)
 		if rc != 0 {
 			os.Exit(1)
@@ -429,7 +429,7 @@ func main() {
 				continue
 			}
 			rc, elapsed, output := runner.RunJob(conn, job, nil, nil)
-			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output})
+			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 		}
 		notify.SendAll(results, notifyCfg)
 		for _, r := range results {
@@ -498,7 +498,7 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.Notif
 			}
 		}
 		rc, elapsed, output := runner.RunJob(conn, job, nil, nil)
-		results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output})
+		results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 	}
 
 	totalTime := 0.0
