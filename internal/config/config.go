@@ -85,6 +85,8 @@ type rawJob struct {
 	Dir         string            `yaml:"dir"`
 	Env         map[string]string `yaml:"env"`
 	Shell       string            `yaml:"shell"`
+	Notify      string            `yaml:"notify"`
+	Paused      bool              `yaml:"paused"`
 }
 
 type rawConfig struct {
@@ -244,6 +246,8 @@ func Load(path string) (*DispatcherConfig, error) {
 			Dir:             rj.Dir,
 			Env:             rj.Env,
 			Shell:           rj.Shell,
+			Notify:          rj.Notify,
+			Paused:          rj.Paused,
 		}
 
 		if rj.Retries != nil {
