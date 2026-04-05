@@ -1,11 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 func buildBinary(t *testing.T) string {
@@ -238,5 +241,74 @@ jobs:
 	}
 	if !strings.Contains(string(out), "yml_test") {
 		t.Errorf("list output missing yml_test (auto-detect failed): %s", out)
+	}
+}
+
+func TestMigration_PreservesData(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	// Create a data.db in the project root (old location) with WAL mode and run history
+	dbPath := filepath.Join(dir, "data.db")
+	conn, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Exec("PRAGMA journal_mode=WAL")
+	conn.Exec("PRAGMA busy_timeout=10000")
+	conn.Exec(`CREATE TABLE IF NOT EXISTS cron_jobs (
+		name TEXT PRIMARY KEY, last_run_at TEXT, next_run_at TEXT NOT NULL,
+		last_status TEXT, last_duration_s REAL, run_count INTEGER DEFAULT 0,
+		fail_count INTEGER DEFAULT 0, running_since TEXT)`)
+	conn.Exec(`CREATE TABLE IF NOT EXISTS job_runs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+		run_at TEXT NOT NULL, status TEXT NOT NULL, exit_code INTEGER, duration_s REAL)`)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at, last_run_at, last_status, run_count) VALUES (?, ?, ?, ?, ?)",
+		"echo_test", "2026-01-01T00:00:00Z", "2026-04-04T12:00:00Z", "ok", 50)
+	for i := 0; i < 25; i++ {
+		conn.Exec("INSERT INTO job_runs (name, run_at, status, exit_code, duration_s) VALUES (?, ?, ?, ?, ?)",
+			"echo_test", "2026-04-04T12:00:00Z", "ok", 0, 1.5)
+	}
+	// Verify WAL file exists while DB is open (proves WAL mode is active)
+	if _, err := os.Stat(filepath.Join(dir, "data.db-wal")); os.IsNotExist(err) {
+		t.Fatal("WAL file should exist before migration")
+	}
+	conn.Close()
+
+	// Run any command to trigger migration
+	out, err := exec.Command(binary, "--config", cfgPath, "list").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+
+	// Verify old data.db is gone
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Error("old data.db should be gone after migration")
+	}
+
+	// Verify new data.db exists
+	newDbPath := filepath.Join(dir, ".dispatcher", "data.db")
+	if _, err := os.Stat(newDbPath); os.IsNotExist(err) {
+		t.Fatal(".dispatcher/data.db should exist after migration")
+	}
+
+	// Verify data survived
+	conn2, err := sql.Open("sqlite", newDbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn2.Close()
+
+	var runCount int
+	conn2.QueryRow("SELECT run_count FROM cron_jobs WHERE name = ?", "echo_test").Scan(&runCount)
+	if runCount != 50 {
+		t.Errorf("run_count = %d, want 50 (data lost during migration)", runCount)
+	}
+
+	var histCount int
+	conn2.QueryRow("SELECT COUNT(*) FROM job_runs WHERE name = ?", "echo_test").Scan(&histCount)
+	if histCount != 25 {
+		t.Errorf("job_runs count = %d, want 25 (history lost during migration)", histCount)
 	}
 }
