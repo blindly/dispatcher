@@ -469,6 +469,8 @@ func main() {
 }
 
 func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.NotifyConfig) {
+	db.SetMeta(conn, "last_dispatch_at", db.NowUTC().Format(time.RFC3339))
+
 	due := db.GetDueJobs(conn, cfg.Jobs, cfg.Timezone)
 	if len(due) == 0 {
 		fmt.Printf("No jobs due (%d jobs configured)\n", len(cfg.Jobs))
@@ -514,9 +516,6 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.Notif
 	fmt.Printf("%s\n  Done: %d ok, %d failed, %.1fs total\n%s\n", sep, passed, failed, totalTime, sep)
 
 	notify.SendAll(results, notifyCfg)
-
-	// Record when this dispatch cycle ran
-	db.SetMeta(conn, "last_dispatch_at", db.NowUTC().Format(time.RFC3339))
 
 	// Auto-purge old history
 	db.PurgeHistory(conn, cfg.Retention)
