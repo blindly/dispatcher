@@ -69,20 +69,19 @@ func ensureDispatcherDir(configDir string) string {
 	dispDir := filepath.Join(configDir, ".dispatcher")
 	os.MkdirAll(dispDir, 0755)
 
-	// Migrate old data.db from project root into .dispatcher/
+	// Migrate old data.db (and WAL/SHM files) from project root into .dispatcher/
 	oldDb := filepath.Join(configDir, "data.db")
 	newDb := filepath.Join(dispDir, "data.db")
 	if _, err := os.Stat(oldDb); err == nil {
 		if _, err := os.Stat(newDb); os.IsNotExist(err) {
-			// Consolidate WAL into data.db by switching to DELETE journal mode.
-			// This forces a checkpoint and removes WAL/SHM files, so data.db
-			// is a single self-contained file safe to move.
-			if tmpConn, err := sql.Open("sqlite", oldDb); err == nil {
-				tmpConn.Exec("PRAGMA journal_mode=DELETE")
-				tmpConn.Close()
-			}
 			if err := os.Rename(oldDb, newDb); err == nil {
 				fmt.Println("Migrated data.db → .dispatcher/data.db")
+			}
+			for _, ext := range []string{"-wal", "-shm"} {
+				old := filepath.Join(configDir, "data.db"+ext)
+				if _, err := os.Stat(old); err == nil {
+					os.Rename(old, filepath.Join(dispDir, "data.db"+ext))
+				}
 			}
 		}
 	}
