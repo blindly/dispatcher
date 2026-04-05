@@ -33,6 +33,11 @@ CREATE INDEX IF NOT EXISTS idx_job_runs_name_run_at ON job_runs(name, run_at);`
 
 const migration1 = `ALTER TABLE cron_jobs ADD COLUMN running_since TEXT;`
 
+const migration2 = `CREATE TABLE IF NOT EXISTS dispatcher_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);`
+
 func Open(dbPath string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -46,6 +51,8 @@ func Open(dbPath string) (*sql.DB, error) {
 	}
 	// Migration: add running_since column if missing
 	db.Exec(migration1)
+	// Migration: add dispatcher_meta table
+	db.Exec(migration2)
 	return db, nil
 }
 
@@ -278,6 +285,19 @@ func GetHistory(db *sql.DB, name string, limit int) ([]HistoryEntry, error) {
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+func SetMeta(db *sql.DB, key, value string) {
+	db.Exec("INSERT INTO dispatcher_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", key, value, value)
+}
+
+func GetMeta(db *sql.DB, key string) string {
+	var value string
+	err := db.QueryRow("SELECT value FROM dispatcher_meta WHERE key = ?", key).Scan(&value)
+	if err != nil {
+		return ""
+	}
+	return value
 }
 
 func PurgeHistory(db *sql.DB, retentionDays int) (int64, error) {

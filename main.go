@@ -515,6 +515,9 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.Notif
 
 	notify.SendAll(results, notifyCfg)
 
+	// Record when this dispatch cycle ran
+	db.SetMeta(conn, "last_dispatch_at", db.NowUTC().Format(time.RFC3339))
+
 	// Auto-purge old history
 	db.PurgeHistory(conn, cfg.Retention)
 }

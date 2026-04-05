@@ -251,6 +251,32 @@ func TestGetHistory_Empty(t *testing.T) {
 	}
 }
 
+func TestMeta(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	// GetMeta returns empty string for missing key
+	if v := GetMeta(conn, "last_dispatch_at"); v != "" {
+		t.Errorf("expected empty, got %q", v)
+	}
+
+	// SetMeta stores a value
+	SetMeta(conn, "last_dispatch_at", "2026-04-04T12:00:00Z")
+	if v := GetMeta(conn, "last_dispatch_at"); v != "2026-04-04T12:00:00Z" {
+		t.Errorf("got %q, want 2026-04-04T12:00:00Z", v)
+	}
+
+	// SetMeta updates existing value
+	SetMeta(conn, "last_dispatch_at", "2026-04-04T13:00:00Z")
+	if v := GetMeta(conn, "last_dispatch_at"); v != "2026-04-04T13:00:00Z" {
+		t.Errorf("got %q, want 2026-04-04T13:00:00Z", v)
+	}
+}
+
 func TestPurgeHistory(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	conn, err := Open(dbPath)

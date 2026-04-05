@@ -71,6 +71,22 @@ func IsCronInstalled(projectDir string) (bool, string) {
 	return false, ""
 }
 
+func formatTimeAgo(now time.Time, iso string) string {
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		return "unknown"
+	}
+	ago := now.Sub(t)
+	if ago < time.Minute {
+		return fmt.Sprintf("%ds ago", int(ago.Seconds()))
+	} else if ago < time.Hour {
+		return fmt.Sprintf("%dm ago", int(ago.Minutes()))
+	} else if ago < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(ago.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(ago.Hours()/24))
+}
+
 func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string) {
 	now := db.NowUTC()
 
@@ -123,21 +139,14 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		}
 	}
 
-	lastRunStr := "never"
+	lastJobRunStr := "never"
 	if lastRunAt.Valid {
-		t, err := time.Parse(time.RFC3339, lastRunAt.String)
-		if err == nil {
-			ago := now.Sub(t)
-			if ago < time.Minute {
-				lastRunStr = fmt.Sprintf("%ds ago", int(ago.Seconds()))
-			} else if ago < time.Hour {
-				lastRunStr = fmt.Sprintf("%dm ago", int(ago.Minutes()))
-			} else if ago < 24*time.Hour {
-				lastRunStr = fmt.Sprintf("%dh ago", int(ago.Hours()))
-			} else {
-				lastRunStr = fmt.Sprintf("%dd ago", int(ago.Hours()/24))
-			}
-		}
+		lastJobRunStr = formatTimeAgo(now, lastRunAt.String)
+	}
+
+	lastDispatchStr := "never"
+	if v := db.GetMeta(conn, "last_dispatch_at"); v != "" {
+		lastDispatchStr = formatTimeAgo(now, v)
 	}
 
 	cronStatus := "not installed"
@@ -145,8 +154,8 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		cronStatus = "installed (" + schedule + ")"
 	}
 
-	statusLine := fmt.Sprintf("Last run: %s | %d jobs | %d due | %d total runs | %d failures",
-		lastRunStr, totalJobs, dueCount, totalRuns, totalFails)
+	statusLine := fmt.Sprintf("Last dispatch: %s | Last job run: %s | %d jobs | %d due | %d total runs | %d failures",
+		lastDispatchStr, lastJobRunStr, totalJobs, dueCount, totalRuns, totalFails)
 	if runningCount > 0 {
 		runningInfo := fmt.Sprintf("%d running", runningCount)
 		if runningStart != "" {
