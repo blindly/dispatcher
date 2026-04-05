@@ -46,10 +46,9 @@ type NotifyConfig struct {
 }
 
 type DispatcherConfig struct {
-	Timezone string            `yaml:"timezone"`
-	Notify   NotifyConfig      `yaml:"notify"`
-	Jobs     map[string]*JobConfig
-	DbPath    string            `yaml:"db_path"`
+	Timezone  string            `yaml:"timezone"`
+	Notify    NotifyConfig      `yaml:"notify"`
+	Jobs      map[string]*JobConfig
 	Schedule  string            `yaml:"schedule"`
 	Retention int               `yaml:"-"` // days, parsed from retention
 	Vars      map[string]string `yaml:"vars"`
@@ -93,7 +92,6 @@ type rawConfig struct {
 	Timezone       string            `yaml:"timezone"`
 	Notify         NotifyConfig      `yaml:"notify"`
 	Jobs           map[string]rawJob `yaml:"jobs"`
-	DbPath         string            `yaml:"db_path"`
 	Schedule       string            `yaml:"schedule"`
 	Retention      string            `yaml:"retention"`
 	DiscordWebhook string            `yaml:"discord_webhook"`
@@ -203,7 +201,6 @@ func Load(path string) (*DispatcherConfig, error) {
 		Timezone:  raw.Timezone,
 		Notify:    raw.Notify,
 		Jobs:      make(map[string]*JobConfig),
-		DbPath:    raw.DbPath,
 		Schedule:  schedule,
 		Retention: retention,
 		Vars:      vars,

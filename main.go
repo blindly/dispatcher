@@ -64,6 +64,82 @@ func detectConfig() string {
 	return "dispatcher.yaml" // default if none found
 }
 
+// ensureDispatcherDir creates the .dispatcher directory and migrates old files from the project root.
+func ensureDispatcherDir(configDir string) string {
+	dispDir := filepath.Join(configDir, ".dispatcher")
+	os.MkdirAll(dispDir, 0755)
+
+	// Migrate old files from project root into .dispatcher/
+	migrations := []string{"data.db", "data.db-shm", "data.db-wal"}
+	for _, name := range migrations {
+		oldPath := filepath.Join(configDir, name)
+		newPath := filepath.Join(dispDir, name)
+		if _, err := os.Stat(oldPath); err == nil {
+			if _, err := os.Stat(newPath); os.IsNotExist(err) {
+				if err := os.Rename(oldPath, newPath); err == nil {
+					fmt.Printf("Migrated %s → .dispatcher/%s\n", name, name)
+				}
+			}
+		}
+	}
+
+	// Migrate logs directory
+	oldLogs := filepath.Join(configDir, "logs")
+	newLogs := filepath.Join(dispDir, "logs")
+	if info, err := os.Stat(oldLogs); err == nil && info.IsDir() {
+		if _, err := os.Stat(newLogs); os.IsNotExist(err) {
+			if err := os.Rename(oldLogs, newLogs); err == nil {
+				fmt.Println("Migrated logs/ → .dispatcher/logs/")
+			}
+		}
+	}
+
+	// Clean up old lock file
+	oldLock := filepath.Join(configDir, ".dispatch.lock")
+	if _, err := os.Stat(oldLock); err == nil {
+		os.Remove(oldLock)
+	}
+
+	// Migrate crontab entry if needed
+	migrateCron(configDir)
+
+	return dispDir
+}
+
+// migrateCron updates an existing crontab entry to use the new .dispatcher/logs/ path.
+func migrateCron(projectDir string) {
+	out, err := exec.Command("crontab", "-l").Output()
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(out), "\n")
+	changed := false
+	for i, line := range lines {
+		if strings.Contains(line, "dispatch") && strings.Contains(line, projectDir) {
+			oldLog := ">> logs/dispatcher.log"
+			newLog := ">> .dispatcher/logs/dispatcher.log"
+			if strings.Contains(line, oldLog) && !strings.Contains(line, newLog) {
+				lines[i] = strings.Replace(line, oldLog, newLog, 1)
+				changed = true
+			}
+		}
+	}
+
+	if !changed {
+		return
+	}
+
+	cmd := exec.Command("crontab", "-")
+	cmd.Stdin = strings.NewReader(strings.Join(lines, "\n"))
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not update crontab: %v\n", err)
+		return
+	}
+	fmt.Println("Migrated crontab: logs/ → .dispatcher/logs/")
+}
+
+
 func initConfig() {
 	// Check if any config already exists
 	candidates := []string{
@@ -211,6 +287,8 @@ func main() {
 		return
 	}
 
+	dispDir := ensureDispatcherDir(configDir)
+
 	if cmd == "logs" {
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: dispatch logs <job>")
@@ -221,7 +299,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", jobName)
 			os.Exit(1)
 		}
-		logPath := filepath.Join(configDir, "logs", jobName+".log")
+		logPath := filepath.Join(dispDir, "logs", jobName+".log")
 		content, err := os.ReadFile(logPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -250,7 +328,7 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		watchLogs(configDir, jobName, cfg.Jobs)
+		watchLogs(dispDir, jobName, cfg.Jobs)
 		return
 	}
 
@@ -276,13 +354,7 @@ func main() {
 		return
 	}
 
-	dbPath := filepath.Join(configDir, "data.db")
-	if cfg.DbPath != "" {
-		dbPath = cfg.DbPath
-		if !filepath.IsAbs(dbPath) {
-			dbPath = filepath.Join(configDir, dbPath)
-		}
-	}
+	dbPath := filepath.Join(dispDir, "data.db")
 	conn, err := db.Open(dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
@@ -292,7 +364,7 @@ func main() {
 
 	db.EnsureJobs(conn, cfg.Jobs)
 	display.SetTimezone(cfg.Timezone)
-	runner.SetLogDir(configDir)
+	runner.SetLogDir(dispDir)
 
 	notifyOn := cfg.Notify.On
 	if notifyOn == "" {
@@ -400,12 +472,12 @@ func main() {
 	}
 
 	// Execution commands — acquire lock
-	lockFd := acquireLock(configDir)
+	lockFd := acquireLock(dispDir)
 	if lockFd == -1 {
 		fmt.Println("Another dispatcher is already running — skipping")
 		return
 	}
-	defer releaseLock(lockFd, configDir)
+	defer releaseLock(lockFd, dispDir)
 
 	// We hold the lock — any non-adhoc running_since is stale from a crashed run
 	db.ClearStaleRunning(conn, cfg.Jobs)
@@ -635,7 +707,7 @@ func installCron(schedule string, projectDir string) {
 	if err != nil {
 		dispatchPath = "dispatch"
 	}
-	cronLine := fmt.Sprintf("%s cd %s && %s >> logs/dispatcher.log 2>&1", schedule, projectDir, dispatchPath)
+	cronLine := fmt.Sprintf("%s cd %s && %s >> .dispatcher/logs/dispatcher.log 2>&1", schedule, projectDir, dispatchPath)
 
 	out, err := exec.Command("crontab", "-l").Output()
 	existing := ""

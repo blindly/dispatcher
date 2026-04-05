@@ -338,7 +338,7 @@ Least reliable: upload-backup (96.6%)
 5. After each run, the DB is updated with the result and next scheduled time.
 6. A summary is posted to Discord (if configured).
 
-SQLite state is stored as `data.db` next to the config file. A file lock prevents concurrent dispatch runs. Per-job output is logged to `logs/<name>.log`.
+Runtime files (SQLite DB, job logs, lock file) are stored in `.dispatcher/` next to the config file. Existing files are auto-migrated on first run.
 
 ## Windows
 

@@ -1,8 +1,4 @@
 dispatch
-data.db
-logs/
-.dispatch.lock
+.dispatcher/
 .env
 CLAUDE.md
-data.db-shm
-data.db-wal
