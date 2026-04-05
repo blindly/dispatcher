@@ -25,7 +25,7 @@ const usage = `Usage: dispatch [command] [options]
 
 Commands:
   (default)    Run due jobs
-  init         Create a default dispatcher.yaml
+  init         Create a default Dispatcher.yaml
   list         Show job status table
   status       Quick summary (last run, due count)
   analytics    Job success rates and run history
@@ -46,22 +46,22 @@ Commands:
   docs         Show full documentation
 
 Options:
-  --config     Config file path (default: dispatcher.yaml)
+  --config     Config file path (default: Dispatcher.yaml)
 `
 
 func detectConfig() string {
 	candidates := []string{
-		"dispatcher.yaml",
-		"dispatcher.yml",
 		"Dispatcher.yaml",
 		"Dispatcher.yml",
+		"dispatcher.yaml",
+		"dispatcher.yml",
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
 	}
-	return "dispatcher.yaml" // default if none found
+	return "Dispatcher.yaml" // default if none found
 }
 
 // ensureDispatcherDir creates the .dispatcher directory and migrates old files from the project root.
@@ -143,10 +143,10 @@ func migrateCron(projectDir string) {
 func initConfig() {
 	// Check if any config already exists
 	candidates := []string{
-		"dispatcher.yaml",
-		"dispatcher.yml",
 		"Dispatcher.yaml",
 		"Dispatcher.yml",
+		"dispatcher.yaml",
+		"dispatcher.yml",
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
@@ -178,11 +178,11 @@ jobs:
     # retries: 2
     # retry_delay: 5s
 `
-	if err := os.WriteFile("dispatcher.yaml", []byte(defaultConfig), 0644); err != nil {
+	if err := os.WriteFile("Dispatcher.yaml", []byte(defaultConfig), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create config: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Created dispatcher.yaml")
+	fmt.Println("Created Dispatcher.yaml")
 }
 
 func main() {

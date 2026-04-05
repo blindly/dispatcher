@@ -52,7 +52,7 @@ dispatch update
 ## Quick start
 
 ```bash
-dispatch init              # creates a dispatcher.yaml with an example job
+dispatch init              # creates a Dispatcher.yaml with an example job
 dispatch validate          # check config syntax
 dispatch run-once hello    # test run without tracking
 dispatch install           # set up cron to run every 5 minutes
@@ -61,7 +61,7 @@ dispatch status            # see summary + cron state
 
 ## Configuration
 
-Create a `dispatcher.yaml` (or run `dispatch init`):
+Create a `Dispatcher.yaml` (or run `dispatch init`):
 
 ```yaml
 timezone: America/New_York
@@ -148,14 +148,14 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 Environment variables in the form `${VAR_NAME}` are expanded throughout the config. Variables are loaded from a `.env` file in the config directory (if present), then from the shell environment. Use this for secrets like webhook URLs:
 
 ```
-# .env (same directory as dispatcher.yaml)
+# .env (same directory as Dispatcher.yaml)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123456/abcdef
 API_KEY=your-secret-key
 ```
 
 Config-level variables use `{{.VAR_NAME}}` syntax from the `vars` section — use these for paths, binaries, and other reusable non-secret values.
 
-Config file auto-detection checks: `dispatcher.yaml`, `dispatcher.yml`, `Dispatcher.yaml`, `Dispatcher.yml`.
+Config file auto-detection checks: `Dispatcher.yaml`, `Dispatcher.yml`, `dispatcher.yaml`, `dispatcher.yml`.
 
 ### Directory, environment, and shell
 
@@ -290,7 +290,7 @@ dispatch docs            # show full documentation
 
 ## Crontab integration
 
-The `schedule` field in `dispatcher.yaml` controls how often cron fires the dispatcher. `dispatch install` reads it from the config:
+The `schedule` field in `Dispatcher.yaml` controls how often cron fires the dispatcher. `dispatch install` reads it from the config:
 
 ```yaml
 schedule: "*/1 * * * *"   # check for due jobs every minute
@@ -331,7 +331,7 @@ Least reliable: upload-backup (96.6%)
 
 ## How it works
 
-1. Reads `dispatcher.yaml` and checks SQLite for jobs where `next_run_at <= now`.
+1. Reads `Dispatcher.yaml` and checks SQLite for jobs where `next_run_at <= now`.
 2. Due jobs are ordered so dependencies run first. Adhoc jobs are skipped.
 3. Each job runs as a subprocess. Failed jobs retry per their config.
 4. Dependent jobs are skipped if their dependency failed.

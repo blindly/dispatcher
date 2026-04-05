@@ -133,14 +133,14 @@ func TestCLI_Init(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exit error: %v\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "Created dispatcher.yaml") {
+	if !strings.Contains(string(out), "Created Dispatcher.yaml") {
 		t.Errorf("unexpected output: %s", out)
 	}
 
 	// Verify file exists
-	content, err := os.ReadFile(filepath.Join(dir, "dispatcher.yaml"))
+	content, err := os.ReadFile(filepath.Join(dir, "Dispatcher.yaml"))
 	if err != nil {
-		t.Fatal("dispatcher.yaml not created")
+		t.Fatal("Dispatcher.yaml not created")
 	}
 	if !strings.Contains(string(content), "timezone") {
 		t.Error("config missing timezone")

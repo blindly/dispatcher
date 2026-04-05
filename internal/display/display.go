@@ -77,7 +77,9 @@ func formatTimeAgo(now time.Time, iso string) string {
 		return "unknown"
 	}
 	ago := now.Sub(t)
-	if ago < time.Minute {
+	if ago < 5*time.Second {
+		return "just now"
+	} else if ago < time.Minute {
 		return fmt.Sprintf("%ds ago", int(ago.Seconds()))
 	} else if ago < time.Hour {
 		return fmt.Sprintf("%dm ago", int(ago.Minutes()))
@@ -154,22 +156,29 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		cronStatus = "installed (" + schedule + ")"
 	}
 
-	statusLine := fmt.Sprintf("Last dispatch: %s | Last job run: %s | %d jobs | %d due | %d total runs | %d failures",
-		lastDispatchStr, lastJobRunStr, totalJobs, dueCount, totalRuns, totalFails)
+	statusLine := fmt.Sprintf("Last dispatch: %s", lastDispatchStr)
 	if runningCount > 0 {
 		runningInfo := fmt.Sprintf("%d running", runningCount)
 		if runningStart != "" {
 			if t, err := time.Parse(time.RFC3339, runningStart); err == nil {
 				ago := now.Sub(t)
+				elapsed := fmt.Sprintf("%dm", int(ago.Minutes()))
+				if ago < time.Minute {
+					elapsed = fmt.Sprintf("%ds", int(ago.Seconds()))
+				}
 				if runningCount == 1 {
-					runningInfo = fmt.Sprintf("%s running (%dm)", runningName, int(ago.Minutes()))
+					runningInfo = fmt.Sprintf("%s running (%s)", runningName, elapsed)
 				} else {
-					runningInfo = fmt.Sprintf("%d running (started %dm ago)", runningCount, int(ago.Minutes()))
+					runningInfo = fmt.Sprintf("%d running (started %s ago)", runningCount, elapsed)
 				}
 			}
 		}
 		statusLine += " | " + runningInfo
+	} else {
+		statusLine += fmt.Sprintf(" | Last job run: %s", lastJobRunStr)
 	}
+	statusLine += fmt.Sprintf(" | %d jobs | %d due | %d total runs | %d failures",
+		totalJobs, dueCount, totalRuns, totalFails)
 	fmt.Println(statusLine)
 	fmt.Printf("Cron: %s\n", cronStatus)
 }
