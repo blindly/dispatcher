@@ -69,17 +69,22 @@ func ensureDispatcherDir(configDir string) string {
 	dispDir := filepath.Join(configDir, ".dispatcher")
 	os.MkdirAll(dispDir, 0755)
 
-	// Migrate old files from project root into .dispatcher/
-	migrations := []string{"data.db", "data.db-shm", "data.db-wal"}
-	for _, name := range migrations {
-		oldPath := filepath.Join(configDir, name)
-		newPath := filepath.Join(dispDir, name)
-		if _, err := os.Stat(oldPath); err == nil {
-			if _, err := os.Stat(newPath); os.IsNotExist(err) {
-				if err := os.Rename(oldPath, newPath); err == nil {
-					fmt.Printf("Migrated %s → .dispatcher/%s\n", name, name)
-				}
+	// Migrate old data.db from project root into .dispatcher/
+	oldDb := filepath.Join(configDir, "data.db")
+	newDb := filepath.Join(dispDir, "data.db")
+	if _, err := os.Stat(oldDb); err == nil {
+		if _, err := os.Stat(newDb); os.IsNotExist(err) {
+			// Checkpoint WAL to flush all pending writes into data.db before moving
+			if tmpConn, err := db.Open(oldDb); err == nil {
+				tmpConn.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+				tmpConn.Close()
 			}
+			if err := os.Rename(oldDb, newDb); err == nil {
+				fmt.Println("Migrated data.db → .dispatcher/data.db")
+			}
+			// Clean up leftover WAL/SHM files
+			os.Remove(filepath.Join(configDir, "data.db-wal"))
+			os.Remove(filepath.Join(configDir, "data.db-shm"))
 		}
 	}
 
@@ -429,7 +434,7 @@ func main() {
 			return
 		}
 		for _, name := range reset {
-			conn.Exec("UPDATE cron_jobs SET next_run_at = ? WHERE name = ?", now, name)
+			conn.Exec("UPDATE cron_jobs SET next_run_at = ?, last_status = NULL, force_next = 1 WHERE name = ?", now, name)
 		}
 		fmt.Printf("Reset %d failed jobs: %s\n", len(reset), strings.Join(reset, ", "))
 		return

@@ -92,13 +92,14 @@ func formatTimeAgo(now time.Time, iso string) string {
 func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string) {
 	now := db.NowUTC()
 
-	var totalJobs, dueCount, runningCount, totalRuns, totalFails int
+	var totalJobs, dueCount, runningCount, failedCount int
 	var lastRunAt sql.NullString
 	var runningStart, runningName string
+	var failedNames []string
 
 	totalJobs = len(jobs)
 
-	rows, err := conn.Query("SELECT name, next_run_at, last_run_at, run_count, fail_count, running_since FROM cron_jobs ORDER BY last_run_at DESC")
+	rows, err := conn.Query("SELECT name, next_run_at, last_run_at, last_status, running_since, force_next FROM cron_jobs ORDER BY last_run_at DESC")
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -108,9 +109,9 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 	first := true
 	for rows.Next() {
 		var name, nextRun string
-		var lr, runningSince sql.NullString
-		var runs, fails int
-		rows.Scan(&name, &nextRun, &lr, &runs, &fails, &runningSince)
+		var forceNext int
+		var lr, lastStatus, runningSince sql.NullString
+		rows.Scan(&name, &nextRun, &lr, &lastStatus, &runningSince, &forceNext)
 
 		job, ok := jobs[name]
 		if !ok {
@@ -124,18 +125,19 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 
 		if runningSince.Valid {
 			runningCount++
-			// Track earliest running job for "running since" display
 			if runningStart == "" || runningSince.String < runningStart {
 				runningStart = runningSince.String
 				runningName = name
 			}
 		}
 
-		totalRuns += runs
-		totalFails += fails
+		if lastStatus.Valid && strings.HasPrefix(lastStatus.String, "failed") {
+			failedCount++
+			failedNames = append(failedNames, name)
+		}
 
 		if !job.Adhoc && !job.Paused && nextRun <= now.Format(time.RFC3339) {
-			if db.IsInActiveHours(job.ActiveHours, tzName) {
+			if forceNext == 1 || db.IsInActiveHours(job.ActiveHours, tzName) {
 				dueCount++
 			}
 		}
@@ -177,8 +179,14 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 	} else {
 		statusLine += fmt.Sprintf(" | Last job run: %s", lastJobRunStr)
 	}
-	statusLine += fmt.Sprintf(" | %d jobs | %d due | %d total runs | %d failures",
-		totalJobs, dueCount, totalRuns, totalFails)
+	statusLine += fmt.Sprintf(" | %d jobs | %d due", totalJobs, dueCount)
+	if failedCount > 0 {
+		if failedCount <= 3 {
+			statusLine += fmt.Sprintf(" | %d failed: %s", failedCount, strings.Join(failedNames, ", "))
+		} else {
+			statusLine += fmt.Sprintf(" | %d failed", failedCount)
+		}
+	}
 	fmt.Println(statusLine)
 	fmt.Printf("Cron: %s\n", cronStatus)
 }
@@ -192,6 +200,7 @@ type jobRow struct {
 	runCount     int
 	failCount    int
 	runningSince sql.NullString
+	forceNext    int
 }
 
 func formatRunning(runningSince sql.NullString, now time.Time) string {
@@ -212,7 +221,7 @@ func formatRunning(runningSince sql.NullString, now time.Time) string {
 func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
 	now := db.NowUTC()
 
-	rows, err := conn.Query("SELECT name, last_run_at, next_run_at, last_status, last_duration_s, run_count, fail_count, running_since FROM cron_jobs ORDER BY next_run_at")
+	rows, err := conn.Query("SELECT name, last_run_at, next_run_at, last_status, last_duration_s, run_count, fail_count, running_since, force_next FROM cron_jobs ORDER BY next_run_at")
 	if err != nil {
 		fmt.Printf("Error querying jobs: %v\n", err)
 		return
@@ -222,7 +231,7 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 	var scheduled, adhoc []jobRow
 	for rows.Next() {
 		var r jobRow
-		rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount, &r.runningSince)
+		rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount, &r.runningSince, &r.forceNext)
 		job, ok := jobs[r.name]
 		if !ok {
 			continue
@@ -263,7 +272,7 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 			active := "always"
 			if job.ActiveHours != nil {
 				active = fmt.Sprintf("%02d-%02d", job.ActiveHours[0], job.ActiveHours[1])
-				if !db.IsInActiveHours(job.ActiveHours, tzName) {
+				if r.forceNext == 0 && !db.IsInActiveHours(job.ActiveHours, tzName) {
 					isDue = ""
 				}
 			}

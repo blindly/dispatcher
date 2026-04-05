@@ -33,6 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_job_runs_name_run_at ON job_runs(name, run_at);`
 
 const migration1 = `ALTER TABLE cron_jobs ADD COLUMN running_since TEXT;`
 
+const migration3 = `ALTER TABLE cron_jobs ADD COLUMN force_next INTEGER DEFAULT 0;`
+
 const migration2 = `CREATE TABLE IF NOT EXISTS dispatcher_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -53,6 +55,8 @@ func Open(dbPath string) (*sql.DB, error) {
 	db.Exec(migration1)
 	// Migration: add dispatcher_meta table
 	db.Exec(migration2)
+	// Migration: add force_next column
+	db.Exec(migration3)
 	return db, nil
 }
 
@@ -134,7 +138,7 @@ func IsInActiveHours(hours *[2]int, tzName string) bool {
 
 func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {
 	now := NowUTC().Format(time.RFC3339)
-	rows, err := db.Query("SELECT name FROM cron_jobs WHERE next_run_at <= ? ORDER BY next_run_at", now)
+	rows, err := db.Query("SELECT name, force_next FROM cron_jobs WHERE next_run_at <= ? ORDER BY next_run_at", now)
 	if err != nil {
 		return nil
 	}
@@ -143,7 +147,8 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 	var due []string
 	for rows.Next() {
 		var name string
-		rows.Scan(&name)
+		var forceNext int
+		rows.Scan(&name, &forceNext)
 		job, ok := jobs[name]
 		if !ok {
 			continue
@@ -151,7 +156,7 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 		if job.Adhoc || job.Paused {
 			continue
 		}
-		if !IsInActiveHours(job.ActiveHours, tzName) {
+		if forceNext == 0 && !IsInActiveHours(job.ActiveHours, tzName) {
 			continue
 		}
 		due = append(due, name)
@@ -168,7 +173,8 @@ func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapse
 	}
 	db.Exec(
 		`UPDATE cron_jobs SET last_run_at = ?, next_run_at = ?, last_status = ?,
-		 last_duration_s = ?, run_count = run_count + 1, fail_count = fail_count + ?
+		 last_duration_s = ?, run_count = run_count + 1, fail_count = fail_count + ?,
+		 force_next = 0
 		 WHERE name = ?`,
 		now.Format(time.RFC3339), nextRun, status, elapsed, failInc, name,
 	)
