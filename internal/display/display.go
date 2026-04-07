@@ -89,15 +89,13 @@ func formatTimeAgo(now time.Time, iso string) string {
 	return fmt.Sprintf("%dd ago", int(ago.Hours()/24))
 }
 
-func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string) {
+func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string, showAll bool) {
 	now := db.NowUTC()
 
 	var totalJobs, dueCount, runningCount, failedCount int
 	var lastRunAt sql.NullString
 	var runningStart, runningName string
 	var failedNames []string
-
-	totalJobs = len(jobs)
 
 	rows, err := conn.Query("SELECT name, next_run_at, last_run_at, last_status, running_since, force_next FROM cron_jobs ORDER BY last_run_at DESC")
 	if err != nil {
@@ -117,6 +115,12 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		if !ok {
 			continue
 		}
+
+		if !showAll && job.Paused {
+			continue
+		}
+
+		totalJobs++
 
 		if first && lr.Valid {
 			lastRunAt = lr
@@ -218,7 +222,7 @@ func formatRunning(runningSince sql.NullString, now time.Time) string {
 	return fmt.Sprintf("RUNNING (%dm)", int(elapsed.Minutes()))
 }
 
-func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
+func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, showAll bool) {
 	now := db.NowUTC()
 
 	rows, err := conn.Query("SELECT name, last_run_at, next_run_at, last_status, last_duration_s, run_count, fail_count, running_since, force_next FROM cron_jobs ORDER BY next_run_at")
@@ -234,6 +238,9 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string)
 		rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount, &r.runningSince, &r.forceNext)
 		job, ok := jobs[r.name]
 		if !ok {
+			continue
+		}
+		if !showAll && job.Paused {
 			continue
 		}
 		if job.Adhoc {

@@ -145,13 +145,15 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 
 \* `interval` is not required when `adhoc: true`.
 
-Environment variables in the form `${VAR_NAME}` are expanded throughout the config. Variables are loaded from a `.env` file in the config directory (if present), then from the shell environment. Use this for secrets like webhook URLs:
+Environment variables in the form `${VAR_NAME}` are expanded throughout the config. Variables are loaded from a `.env` file in `.dispatcher/.env` (if present), then from the shell environment. Use this for secrets like webhook URLs:
 
 ```
-# .env (same directory as Dispatcher.yaml)
+# .dispatcher/.env
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123456/abcdef
 API_KEY=your-secret-key
 ```
+
+On first run, a `.env` file in the config directory (project root) is automatically migrated to `.dispatcher/.env`.
 
 Config-level variables use `{{.VAR_NAME}}` syntax from the `vars` section — use these for paths, binaries, and other reusable non-secret values.
 
@@ -338,7 +340,14 @@ Least reliable: upload-backup (96.6%)
 5. After each run, the DB is updated with the result and next scheduled time.
 6. A summary is posted to Discord (if configured).
 
-Runtime files (SQLite DB, job logs, lock file) are stored in `.dispatcher/` next to the config file. Existing files are auto-migrated on first run.
+Runtime files (SQLite DB, job logs, lock file, .env) are stored in `.dispatcher/` next to the config file. Existing files are auto-migrated on first run.
+
+```
+.dispatcher/
+  data.db          # SQLite state
+  .env              # Secrets and environment variables
+  logs/             # Per-job log files
+```
 
 ## Windows
 

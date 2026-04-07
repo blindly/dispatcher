@@ -120,11 +120,17 @@ func ExpandVars(text string, vars map[string]string) string {
 }
 
 // LoadDotEnv reads a .env file and sets the variables in the process environment.
+// Checks .dispatcher/.env first, then falls back to dir/.env for backward compatibility.
 func LoadDotEnv(dir string) {
-	envPath := dir + "/.env"
+	envPath := dir + "/.dispatcher/.env"
 	data, err := os.ReadFile(envPath)
 	if err != nil {
-		return // .env is optional
+		// Fallback to old location (project root)
+		envPath = dir + "/.env"
+		data, err = os.ReadFile(envPath)
+		if err != nil {
+			return // .env is optional
+		}
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)

@@ -26,8 +26,8 @@ const usage = `Usage: dispatch [command] [options]
 Commands:
   (default)    Run due jobs
   init         Create a default Dispatcher.yaml
-  list         Show job status table
-  status       Quick summary (last run, due count)
+  list, ls     Show job status table (-a to include paused)
+  status, ps   Quick summary (-a to include paused)
   analytics    Job success rates and run history
   history      Show last 20 runs for a job
   run          Force-run a specific job
@@ -101,6 +101,17 @@ func ensureDispatcherDir(configDir string) string {
 	oldLock := filepath.Join(configDir, ".dispatch.lock")
 	if _, err := os.Stat(oldLock); err == nil {
 		os.Remove(oldLock)
+	}
+
+	// Migrate .env from project root into .dispatcher/
+	oldEnv := filepath.Join(configDir, ".env")
+	newEnv := filepath.Join(dispDir, ".env")
+	if _, err := os.Stat(oldEnv); err == nil {
+		if _, err := os.Stat(newEnv); os.IsNotExist(err) {
+			if err := os.Rename(oldEnv, newEnv); err == nil {
+				fmt.Println("Migrated .env → .dispatcher/.env")
+			}
+		}
 	}
 
 	// Migrate crontab entry if needed
@@ -209,10 +220,19 @@ func main() {
 	}
 	args = filtered
 
+	// Command aliases
+	aliases := map[string]string{
+		"ps": "status",
+		"ls": "list",
+	}
+
 	cmd := ""
 	if len(args) > 0 {
 		cmd = args[0]
 		args = args[1:]
+	}
+	if alias, ok := aliases[cmd]; ok {
+		cmd = alias
 	}
 
 	if cmd == "-h" || cmd == "--help" || cmd == "help" {
@@ -384,7 +404,13 @@ func main() {
 
 	// Read-only: no lock needed
 	if cmd == "list" {
-		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone)
+		showAll := false
+		for _, a := range args {
+			if a == "-a" || a == "--all" {
+				showAll = true
+			}
+		}
+		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone, showAll)
 		return
 	}
 
@@ -407,7 +433,13 @@ func main() {
 	}
 
 	if cmd == "status" {
-		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir)
+		showAll := false
+		for _, a := range args {
+			if a == "-a" || a == "--all" {
+				showAll = true
+			}
+		}
+		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll)
 		return
 	}
 
