@@ -103,17 +103,6 @@ func ensureDispatcherDir(configDir string) string {
 		os.Remove(oldLock)
 	}
 
-	// Migrate .env from project root into .dispatcher/
-	oldEnv := filepath.Join(configDir, ".env")
-	newEnv := filepath.Join(dispDir, ".env")
-	if _, err := os.Stat(oldEnv); err == nil {
-		if _, err := os.Stat(newEnv); os.IsNotExist(err) {
-			if err := os.Rename(oldEnv, newEnv); err == nil {
-				fmt.Println("Migrated .env → .dispatcher/.env")
-			}
-		}
-	}
-
 	// Migrate crontab entry if needed
 	migrateCron(configDir)
 
