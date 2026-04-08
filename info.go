@@ -90,24 +90,33 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	sort.Strings(adhoc)
 	sort.Strings(paused)
 
+	// Find longest job name for column alignment
+	nameWidth := 0
+	for name := range cfg.Jobs {
+		if len(name) > nameWidth {
+			nameWidth = len(name)
+		}
+	}
+	nameWidth += 2 // padding
+
 	fmt.Printf("Jobs: %d scheduled, %d adhoc, %d paused\n", len(scheduled), len(adhoc), len(paused))
 
 	if len(scheduled) > 0 {
 		fmt.Println("  Scheduled:")
 		for _, name := range scheduled {
-			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name]))
+			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name], nameWidth))
 		}
 	}
 	if len(adhoc) > 0 {
 		fmt.Println("  Adhoc:")
 		for _, name := range adhoc {
-			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name]))
+			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name], nameWidth))
 		}
 	}
 	if len(paused) > 0 {
 		fmt.Println("  Paused:")
 		for _, name := range paused {
-			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name]))
+			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name], nameWidth))
 		}
 	}
 	fmt.Println()
@@ -137,8 +146,8 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	}
 }
 
-func formatJobInfo(name string, job *config.JobConfig) string {
-	parts := []string{fmt.Sprintf("%-20s", name)}
+func formatJobInfo(name string, job *config.JobConfig, nameWidth int) string {
+	parts := []string{fmt.Sprintf("%-*s", nameWidth, name)}
 
 	if job.IntervalSeconds > 0 {
 		parts = append(parts, fmt.Sprintf("%-4s", display.FormatInterval(job.IntervalSeconds)))
