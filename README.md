@@ -67,6 +67,7 @@ Create a `Dispatcher.yaml` (or run `dispatch init`):
 timezone: America/New_York
 schedule: "*/5 * * * *"   # how often cron checks for due jobs (default: */5)
 retention: 90d              # how long to keep run history (default: 90d)
+pause_timeout: 1h           # default pause duration (default: 1h)
 
 vars:
   BACKUP_DIR: /var/backups/myapp
@@ -268,9 +269,13 @@ dispatch run deploy ENV=production VERSION=1.2.3 -- --no-cache
 dispatch                 # run due jobs (the cron use case)
 dispatch list            # full job status table
 dispatch status          # quick summary + cron state
-dispatch run <job>       # force-run with DB tracking
+dispatch run <job>       # force-run with DB tracking (alias: exec)
 dispatch run-once <job>  # run without DB tracking
 dispatch run-all         # force-run all scheduled jobs
+dispatch pause           # pause scheduled dispatch (default: 1h)
+dispatch pause 2h        # pause for a specific duration
+dispatch pause "reason"  # pause with a reason
+dispatch resume          # resume scheduled dispatch
 dispatch reset <job>     # reset schedule to run now
 dispatch logs <job>      # show recent job output
 dispatch watch           # live tail all job logs
@@ -328,6 +333,22 @@ Overall: 903 runs, 99.7% success rate, 4 jobs
 Most reliable: health-check (99.9%)
 Least reliable: upload-backup (96.6%)
 ```
+
+## Pausing
+
+Pause the dispatcher to prevent scheduled jobs from running while you're working on something:
+
+```bash
+dispatch pause                    # pause for default duration (1h)
+dispatch pause 2h                 # pause for 2 hours
+dispatch pause "fixing the ETL"   # pause with a reason
+dispatch pause 2h "deploying"     # duration + reason
+dispatch resume                   # resume early
+```
+
+While paused, manual runs (`dispatch run`, `dispatch exec`, `dispatch run-once`) still work. Only the cron-triggered default dispatch is blocked. The `list` and `status` commands show a banner when paused.
+
+Pauses auto-expire after the configured duration (default: 1h, set via `pause_timeout` in config). You can also pause manually with `touch .dispatcher/paused` — this has no expiry and must be resumed with `dispatch resume` or `rm .dispatcher/paused`.
 
 ## How it works
 
