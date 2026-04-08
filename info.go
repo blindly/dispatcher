@@ -150,33 +150,14 @@ func formatJobInfo(name string, job *config.JobConfig, nameWidth int) string {
 	parts := []string{fmt.Sprintf("%-*s", nameWidth, name)}
 
 	if job.IntervalSeconds > 0 {
-		parts = append(parts, fmt.Sprintf("%-4s", display.FormatInterval(job.IntervalSeconds)))
-	}
-
-	// Only show active hours if the job has a schedule
-	if !job.Adhoc {
-		if job.ActiveHours != nil {
-			parts = append(parts, fmt.Sprintf("active: %02d-%02d", job.ActiveHours[0], job.ActiveHours[1]))
-		} else {
-			parts = append(parts, "active: always")
-		}
-	}
-
-	if job.Timeout != 600 {
-		parts = append(parts, fmt.Sprintf("timeout: %s", display.FormatInterval(job.Timeout)))
-	}
-
-	if job.Retries != 2 {
-		parts = append(parts, fmt.Sprintf("retries: %d", job.Retries))
-	}
-
-	if job.DependsOn != "" {
-		parts = append(parts, fmt.Sprintf("depends: %s", job.DependsOn))
+		parts = append(parts, fmt.Sprintf("%-5s", display.FormatInterval(job.IntervalSeconds)))
+	} else {
+		parts = append(parts, fmt.Sprintf("%-5s", ""))
 	}
 
 	if job.Description != "" {
 		parts = append(parts, job.Description)
 	}
 
-	return strings.Join(parts, "   ")
+	return strings.Join(parts, "  ")
 }
