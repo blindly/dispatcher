@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 )
@@ -102,7 +103,7 @@ func Update(currentVersion string, targetVersion string) error {
 		return fmt.Errorf("finding executable path: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp("", "dispatch-update-*")
+	tmpFile, err := os.CreateTemp(filepath.Dir(execPath), "dispatch-update-*")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
