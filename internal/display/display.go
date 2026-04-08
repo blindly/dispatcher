@@ -19,8 +19,10 @@ func FormatInterval(seconds int) string {
 		return fmt.Sprintf("%dd", seconds/86400)
 	case seconds >= 3600:
 		return fmt.Sprintf("%dh", seconds/3600)
-	default:
+	case seconds >= 60:
 		return fmt.Sprintf("%dm", seconds/60)
+	default:
+		return fmt.Sprintf("%ds", seconds)
 	}
 }
 

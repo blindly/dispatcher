@@ -107,7 +107,7 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	if len(paused) > 0 {
 		fmt.Println("  Paused:")
 		for _, name := range paused {
-			fmt.Printf("    %s  (paused in config)\n", formatJobInfo(name, cfg.Jobs[name]))
+			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name]))
 		}
 	}
 	fmt.Println()
@@ -144,10 +144,13 @@ func formatJobInfo(name string, job *config.JobConfig) string {
 		parts = append(parts, fmt.Sprintf("%-4s", display.FormatInterval(job.IntervalSeconds)))
 	}
 
-	if job.ActiveHours != nil {
-		parts = append(parts, fmt.Sprintf("active: %02d-%02d", job.ActiveHours[0], job.ActiveHours[1]))
-	} else {
-		parts = append(parts, "active: always")
+	// Only show active hours if the job has a schedule
+	if !job.Adhoc {
+		if job.ActiveHours != nil {
+			parts = append(parts, fmt.Sprintf("active: %02d-%02d", job.ActiveHours[0], job.ActiveHours[1]))
+		} else {
+			parts = append(parts, "active: always")
+		}
 	}
 
 	if job.Timeout != 600 {
@@ -163,7 +166,7 @@ func formatJobInfo(name string, job *config.JobConfig) string {
 	}
 
 	if job.Description != "" {
-		parts = append(parts, fmt.Sprintf("(%s)", job.Description))
+		parts = append(parts, job.Description)
 	}
 
 	return strings.Join(parts, "   ")

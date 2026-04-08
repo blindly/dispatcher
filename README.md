@@ -360,12 +360,12 @@ State
 
 Jobs: 4 scheduled, 1 adhoc, 0 paused
   Scheduled:
-    cleanup-old           1w     active: always   (Delete backups older than 30 days)
-    db-backup             1d     active: always   timeout: 10m   (Dump and compress the database)
-    health-check          5m     active: 06-22    timeout: 30s   retries: 3   (Ping the app endpoint)
-    upload-backup         1d     active: always   retries: 3     depends: db-backup   (Push backup to S3)
+    cleanup-old           1w     active: always   Delete backups older than 30 days
+    db-backup             1d     active: always   timeout: 10m   Dump and compress the database
+    health-check          5m     active: 06-22    timeout: 30s   retries: 3   Ping the app endpoint
+    upload-backup         1d     active: always   retries: 3     depends: db-backup   Push backup to S3
   Adhoc:
-    restore               active: always   (Restore a backup)
+    restore               Restore a backup
 
 Notifications
   Mode:          failure
