@@ -342,8 +342,8 @@ Least reliable: upload-backup (96.6%)
 ```
 Dispatcher
   Version:       v1.10.1
-  Config:        /home/wk/projects/myapp/Dispatcher.yaml
-  Data dir:      /home/wk/projects/myapp/.dispatcher
+  Config:        /srv/myapp/Dispatcher.yaml
+  Data dir:      /srv/myapp/.dispatcher
   Timezone:      America/New_York
   Schedule:      */5 * * * *
   Retention:     90d
@@ -351,12 +351,12 @@ Dispatcher
 
 Cron
   Status:        installed
-  Entry:         */5 * * * * cd /home/wk/projects/myapp && dispatch >> .dispatcher/logs/dispatcher.log 2>&1
+  Entry:         */5 * * * * cd /srv/myapp && dispatch >> .dispatcher/logs/dispatcher.log 2>&1
 
 State
   Paused:        no
   Last dispatch: 2026-04-07 21:30:00
-  Database:      /home/wk/projects/myapp/.dispatcher/data.db (248.0 KB)
+  Database:      /srv/myapp/.dispatcher/data.db (248.0 KB)
 
 Jobs: 4 scheduled, 1 adhoc, 0 paused
   Scheduled:
