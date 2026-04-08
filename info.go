@@ -101,11 +101,7 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	if len(adhoc) > 0 {
 		fmt.Println("  Adhoc:")
 		for _, name := range adhoc {
-			fmt.Printf("    %-20s", name)
-			if cfg.Jobs[name].Description != "" {
-				fmt.Printf("  %s", cfg.Jobs[name].Description)
-			}
-			fmt.Println()
+			fmt.Printf("    %s\n", formatJobInfo(name, cfg.Jobs[name]))
 		}
 	}
 	if len(paused) > 0 {
@@ -164,6 +160,10 @@ func formatJobInfo(name string, job *config.JobConfig) string {
 
 	if job.DependsOn != "" {
 		parts = append(parts, fmt.Sprintf("depends: %s", job.DependsOn))
+	}
+
+	if job.Description != "" {
+		parts = append(parts, fmt.Sprintf("(%s)", job.Description))
 	}
 
 	return strings.Join(parts, "   ")
