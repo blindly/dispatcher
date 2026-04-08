@@ -369,6 +369,73 @@ func TestCLI_ExecAlias(t *testing.T) {
 	}
 }
 
+func TestCLI_Info(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "info").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	output := string(out)
+
+	// Should contain all major sections
+	for _, section := range []string{"Dispatcher", "Config:", "Data dir:", "Timezone:", "Schedule:", "Retention:", "Pause timeout:", "State", "Jobs"} {
+		if !strings.Contains(output, section) {
+			t.Errorf("info output missing %q:\n%s", section, output)
+		}
+	}
+}
+
+func TestCLI_InfoShowsPaused(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	// Pause first
+	exec.Command(binary, "--config", cfgPath, "pause", "working on stuff").CombinedOutput()
+
+	out, err := exec.Command(binary, "--config", cfgPath, "info").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "working on stuff") {
+		t.Errorf("info should show pause reason:\n%s", out)
+	}
+}
+
+func TestCLI_InfoNotifications(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+
+	cfg := `
+timezone: America/New_York
+notify:
+  on: failure
+  discord:
+    webhook: https://discord.com/hook
+jobs:
+  j1:
+    command: echo hi
+    interval: 5m
+`
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(cfg), 0644)
+
+	out, err := exec.Command(binary, "--config", path, "info").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	output := string(out)
+	if !strings.Contains(output, "Discord") {
+		t.Errorf("info should show Discord configured:\n%s", output)
+	}
+	if !strings.Contains(output, "failure") {
+		t.Errorf("info should show notification mode:\n%s", output)
+	}
+}
+
 func TestMigration_PreservesData(t *testing.T) {
 	binary := buildBinary(t)
 	dir := t.TempDir()

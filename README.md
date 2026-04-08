@@ -281,6 +281,7 @@ dispatch logs <job>      # show recent job output
 dispatch watch           # live tail all job logs
 dispatch watch <job>     # live tail a specific job
 dispatch history <job>   # show last 20 runs for a job
+dispatch info            # show full config, state, and job summary
 dispatch analytics       # job success rates and run history
 dispatch purge           # delete old run history (uses retention config)
 dispatch purge 30d       # delete history older than 30 days

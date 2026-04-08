@@ -35,6 +35,7 @@ Commands:
   run-all      Force-run all jobs
   pause        Pause scheduled dispatch [duration] [reason]
   resume       Resume scheduled dispatch
+  info         Show dispatcher configuration and state
   reset        Reset a job's next_run to now
   retry-failed Reset all failed jobs to run next cycle
   purge        Delete old run history (default: retention config)
@@ -474,6 +475,11 @@ func main() {
 		}
 		display.PrintPauseBanner(pauseMsg)
 		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll)
+		return
+	}
+
+	if cmd == "info" {
+		printInfo(cfg, configPath, configDir, dispDir, conn)
 		return
 	}
 
