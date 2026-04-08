@@ -78,9 +78,9 @@ func checkPause(dir string) (paused bool, msg string) {
 	}
 
 	timeLeft := time.Until(expiresAt).Round(time.Minute)
-	msg = fmt.Sprintf("Dispatcher paused until %s (%s remaining)", expiresAt.Format("15:04 UTC"), timeLeft)
+	msg = fmt.Sprintf("Dispatcher paused until %s (%s remaining)", expiresAt.Local().Format("15:04"), timeLeft)
 	if info.Reason != "" {
-		msg = fmt.Sprintf("Dispatcher paused until %s — %s (%s remaining)", expiresAt.Format("15:04 UTC"), info.Reason, timeLeft)
+		msg = fmt.Sprintf("Dispatcher paused until %s — %s (%s remaining)", expiresAt.Local().Format("15:04"), info.Reason, timeLeft)
 	}
 	return true, msg
 }

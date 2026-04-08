@@ -322,7 +322,7 @@ func main() {
 		expiresAt := time.Now().UTC().Add(duration)
 		writePauseFile(dispDir, expiresAt, reason)
 		durationStr := FormatDuration(duration)
-		msg := fmt.Sprintf("Dispatcher paused for %s (until %s)", durationStr, expiresAt.Format("15:04 UTC"))
+		msg := fmt.Sprintf("Dispatcher paused for %s (until %s)", durationStr, expiresAt.Local().Format("15:04"))
 		if reason != "" {
 			msg += fmt.Sprintf(" — %s", reason)
 		}
