@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -32,12 +33,30 @@ func assetName() string {
 	return name
 }
 
+func isPreleaseTag(tag string) bool {
+	return strings.Contains(tag, "-beta") || strings.Contains(tag, "-alpha") || strings.Contains(tag, "-rc")
+}
+
 func fetchRelease(version string) (*release, error) {
-	url := repoAPI + "/latest"
+	// Specific version requested — fetch directly
 	if version != "" {
-		url = repoAPI + "/tags/" + version
+		return fetchReleaseByTag(repoAPI+"/tags/"+version, version)
 	}
 
+	// Fetch latest stable — try /latest first, fall back to listing if it returns a pre-release
+	rel, err := fetchReleaseByTag(repoAPI+"/latest", "")
+	if err != nil {
+		return nil, err
+	}
+	if !isPreleaseTag(rel.TagName) {
+		return rel, nil
+	}
+
+	// /latest returned a pre-release (not marked properly on GitHub) — scan the list
+	return fetchLatestStable(repoAPI)
+}
+
+func fetchReleaseByTag(url, version string) (*release, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -60,6 +79,32 @@ func fetchRelease(version string) (*release, error) {
 		return nil, fmt.Errorf("parsing release: %w", err)
 	}
 	return &rel, nil
+}
+
+func fetchLatestStable(apiURL string) (*release, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetching releases: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var releases []release
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("parsing releases: %w", err)
+	}
+
+	for _, rel := range releases {
+		if !rel.Prerelease && !isPreleaseTag(rel.TagName) {
+			r := rel
+			return &r, nil
+		}
+	}
+	return nil, fmt.Errorf("no stable releases found")
 }
 
 func fetchLatestBeta(apiURL string) (*release, error) {

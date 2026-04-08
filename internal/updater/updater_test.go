@@ -57,6 +57,47 @@ func TestFetchLatestBeta(t *testing.T) {
 	}
 }
 
+func TestFetchLatestStable_SkipsBetas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		releases := []release{
+			{TagName: "v1.12.0-beta.2", Prerelease: true},
+			{TagName: "v1.12.0-beta.1", Prerelease: true},
+			{TagName: "v1.11.0", Prerelease: false, Assets: []asset{{Name: assetName(), BrowserDownloadURL: "https://example.com/stable"}}},
+			{TagName: "v1.10.0", Prerelease: false},
+		}
+		json.NewEncoder(w).Encode(releases)
+	}))
+	defer server.Close()
+
+	rel, err := fetchLatestStable(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel.TagName != "v1.11.0" {
+		t.Errorf("got %q, want v1.11.0", rel.TagName)
+	}
+}
+
+func TestFetchLatestStable_SkipsMislabeledBetas(t *testing.T) {
+	// Beta tag but prerelease=false (the bug we hit)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		releases := []release{
+			{TagName: "v1.12.0-beta.1", Prerelease: false},
+			{TagName: "v1.11.0", Prerelease: false, Assets: []asset{{Name: assetName(), BrowserDownloadURL: "https://example.com/stable"}}},
+		}
+		json.NewEncoder(w).Encode(releases)
+	}))
+	defer server.Close()
+
+	rel, err := fetchLatestStable(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel.TagName != "v1.11.0" {
+		t.Errorf("got %q, want v1.11.0 (should skip mislabeled beta)", rel.TagName)
+	}
+}
+
 func TestFetchLatestBeta_NoBetas(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		releases := []release{
