@@ -89,6 +89,12 @@ func formatTimeAgo(now time.Time, iso string) string {
 	return fmt.Sprintf("%dd ago", int(ago.Hours()/24))
 }
 
+func PrintPauseBanner(pauseMsg string) {
+	if pauseMsg != "" {
+		fmt.Printf("⏸  %s\n", pauseMsg)
+	}
+}
+
 func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string, showAll bool) {
 	now := db.NowUTC()
 

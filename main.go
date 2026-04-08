@@ -30,9 +30,11 @@ Commands:
   status, ps   Quick summary (-a to include paused)
   analytics    Job success rates and run history
   history      Show last 20 runs for a job
-  run          Force-run a specific job
+  run, exec    Force-run a specific job
   run-once     Run a job without DB tracking
   run-all      Force-run all jobs
+  pause        Pause scheduled dispatch [duration] [reason]
+  resume       Resume scheduled dispatch
   reset        Reset a job's next_run to now
   retry-failed Reset all failed jobs to run next cycle
   purge        Delete old run history (default: retention config)
@@ -161,6 +163,7 @@ func initConfig() {
 	defaultConfig := `timezone: America/New_York
 # schedule: "*/5 * * * *"
 # retention: 90d
+# pause_timeout: 1h
 
 # notify:
 #   discord:
@@ -211,8 +214,9 @@ func main() {
 
 	// Command aliases
 	aliases := map[string]string{
-		"ps": "status",
-		"ls": "list",
+		"ps":   "status",
+		"ls":   "list",
+		"exec": "run",
 	}
 
 	cmd := ""
@@ -300,6 +304,42 @@ func main() {
 	}
 
 	dispDir := ensureDispatcherDir(configDir)
+
+	if cmd == "pause" {
+		duration := time.Duration(cfg.PauseTimeout) * time.Second
+		reason := ""
+		// Parse args: [duration] [reason]
+		if len(args) > 0 {
+			if parsed, err := config.ParseInterval(args[0]); err == nil {
+				duration = time.Duration(parsed) * time.Second
+				if len(args) > 1 {
+					reason = strings.Join(args[1:], " ")
+				}
+			} else {
+				reason = strings.Join(args, " ")
+			}
+		}
+		expiresAt := time.Now().UTC().Add(duration)
+		writePauseFile(dispDir, expiresAt, reason)
+		durationStr := FormatDuration(duration)
+		msg := fmt.Sprintf("Dispatcher paused for %s (until %s)", durationStr, expiresAt.Format("15:04 UTC"))
+		if reason != "" {
+			msg += fmt.Sprintf(" — %s", reason)
+		}
+		fmt.Println(msg)
+		return
+	}
+
+	if cmd == "resume" {
+		info := readPauseFile(dispDir)
+		if info == nil {
+			fmt.Println("Dispatcher is not paused")
+			return
+		}
+		removePauseFile(dispDir)
+		fmt.Println("Dispatcher resumed")
+		return
+	}
 
 	if cmd == "logs" {
 		if len(args) < 1 {
@@ -391,6 +431,9 @@ func main() {
 		NtfyPriority:   cfg.Notify.Ntfy.Priority,
 	}
 
+	// Check pause state for display commands
+	_, pauseMsg := checkPause(dispDir)
+
 	// Read-only: no lock needed
 	if cmd == "list" {
 		showAll := false
@@ -399,6 +442,7 @@ func main() {
 				showAll = true
 			}
 		}
+		display.PrintPauseBanner(pauseMsg)
 		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone, showAll)
 		return
 	}
@@ -428,6 +472,7 @@ func main() {
 				showAll = true
 			}
 		}
+		display.PrintPauseBanner(pauseMsg)
 		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll)
 		return
 	}
@@ -555,6 +600,10 @@ func main() {
 		fmt.Printf("Purged %d history entries older than %dd\n", deleted, days)
 
 	case "":
+		if paused, msg := checkPause(dispDir); paused {
+			fmt.Println(msg)
+			return
+		}
 		dispatch(conn, cfg, notifyCfg)
 
 	default:

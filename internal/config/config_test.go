@@ -563,3 +563,44 @@ jobs:
 		t.Errorf("retention = %d, want 30", cfg.Retention)
 	}
 }
+
+func TestLoad_PauseTimeoutDefault(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PauseTimeout != 3600 {
+		t.Errorf("pause_timeout = %d, want 3600", cfg.PauseTimeout)
+	}
+}
+
+func TestLoad_PauseTimeoutCustom(t *testing.T) {
+	yaml := `
+pause_timeout: 2h
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PauseTimeout != 7200 {
+		t.Errorf("pause_timeout = %d, want 7200", cfg.PauseTimeout)
+	}
+}

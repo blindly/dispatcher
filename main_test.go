@@ -244,6 +244,131 @@ jobs:
 	}
 }
 
+func TestCLI_Pause(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "pause").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Dispatcher paused") {
+		t.Errorf("unexpected output: %s", out)
+	}
+
+	// Verify pause file exists
+	pausePath := filepath.Join(dir, ".dispatcher", "paused")
+	if _, err := os.Stat(pausePath); os.IsNotExist(err) {
+		t.Error("pause file should exist")
+	}
+}
+
+func TestCLI_PauseWithDurationAndReason(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "pause", "2h", "deploying changes").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "2h") {
+		t.Errorf("output should mention duration: %s", out)
+	}
+	if !strings.Contains(string(out), "deploying changes") {
+		t.Errorf("output should mention reason: %s", out)
+	}
+}
+
+func TestCLI_Resume(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	// Pause first
+	exec.Command(binary, "--config", cfgPath, "pause").CombinedOutput()
+
+	// Then resume
+	out, err := exec.Command(binary, "--config", cfgPath, "resume").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "resumed") {
+		t.Errorf("unexpected output: %s", out)
+	}
+
+	// Verify pause file is gone
+	pausePath := filepath.Join(dir, ".dispatcher", "paused")
+	if _, err := os.Stat(pausePath); !os.IsNotExist(err) {
+		t.Error("pause file should be removed after resume")
+	}
+}
+
+func TestCLI_ResumeWhenNotPaused(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "resume").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "not paused") {
+		t.Errorf("expected 'not paused' message: %s", out)
+	}
+}
+
+func TestCLI_DispatchWhilePaused(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	// Pause
+	exec.Command(binary, "--config", cfgPath, "pause").CombinedOutput()
+
+	// Default dispatch should be blocked
+	out, err := exec.Command(binary, "--config", cfgPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "paused") {
+		t.Errorf("dispatch should mention paused: %s", out)
+	}
+}
+
+func TestCLI_RunWhilePaused(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	// Pause
+	exec.Command(binary, "--config", cfgPath, "pause").CombinedOutput()
+
+	// Manual run should still work
+	out, err := exec.Command(binary, "--config", cfgPath, "run-once", "echo_test").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "hello") {
+		t.Errorf("run-once should still work while paused: %s", out)
+	}
+}
+
+func TestCLI_ExecAlias(t *testing.T) {
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	cfgPath := writeTestConfig(t, dir)
+
+	out, err := exec.Command(binary, "--config", cfgPath, "exec", "echo_test").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exit error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "hello") {
+		t.Errorf("exec should work like run-once: %s", out)
+	}
+}
+
 func TestMigration_PreservesData(t *testing.T) {
 	binary := buildBinary(t)
 	dir := t.TempDir()

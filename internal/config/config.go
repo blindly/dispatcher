@@ -46,12 +46,13 @@ type NotifyConfig struct {
 }
 
 type DispatcherConfig struct {
-	Timezone  string            `yaml:"timezone"`
-	Notify    NotifyConfig      `yaml:"notify"`
-	Jobs      map[string]*JobConfig
-	Schedule  string            `yaml:"schedule"`
-	Retention int               `yaml:"-"` // days, parsed from retention
-	Vars      map[string]string `yaml:"vars"`
+	Timezone     string            `yaml:"timezone"`
+	Notify       NotifyConfig      `yaml:"notify"`
+	Jobs         map[string]*JobConfig
+	Schedule     string            `yaml:"schedule"`
+	Retention    int               `yaml:"-"` // days, parsed from retention
+	PauseTimeout int              `yaml:"-"` // seconds, parsed from pause_timeout
+	Vars         map[string]string `yaml:"vars"`
 }
 
 // stringOrList handles YAML values that can be either a string or list of strings.
@@ -94,6 +95,7 @@ type rawConfig struct {
 	Jobs           map[string]rawJob `yaml:"jobs"`
 	Schedule       string            `yaml:"schedule"`
 	Retention      string            `yaml:"retention"`
+	PauseTimeout   string            `yaml:"pause_timeout"`
 	DiscordWebhook string            `yaml:"discord_webhook"`
 	Vars           map[string]string `yaml:"vars"`
 }
@@ -203,13 +205,23 @@ func Load(path string) (*DispatcherConfig, error) {
 		}
 	}
 
+	pauseTimeout := 3600 // default 1h
+	if raw.PauseTimeout != "" {
+		pt, err := ParseInterval(raw.PauseTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("pause_timeout: %w", err)
+		}
+		pauseTimeout = pt
+	}
+
 	cfg := &DispatcherConfig{
-		Timezone:  raw.Timezone,
-		Notify:    raw.Notify,
-		Jobs:      make(map[string]*JobConfig),
-		Schedule:  schedule,
-		Retention: retention,
-		Vars:      vars,
+		Timezone:     raw.Timezone,
+		Notify:       raw.Notify,
+		Jobs:         make(map[string]*JobConfig),
+		Schedule:     schedule,
+		Retention:    retention,
+		PauseTimeout: pauseTimeout,
+		Vars:         vars,
 	}
 
 	if cfg.Notify.Discord.Webhook == "" && raw.DiscordWebhook != "" {
