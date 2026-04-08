@@ -335,6 +335,46 @@ Most reliable: health-check (99.9%)
 Least reliable: upload-backup (96.6%)
 ```
 
+## System info
+
+`dispatch info` shows the full effective configuration and runtime state — what the dispatcher actually sees after parsing, env expansion, and defaults:
+
+```
+Dispatcher
+  Version:       v1.10.1
+  Config:        /home/wk/projects/myapp/Dispatcher.yaml
+  Data dir:      /home/wk/projects/myapp/.dispatcher
+  Timezone:      America/New_York
+  Schedule:      */5 * * * *
+  Retention:     90d
+  Pause timeout: 1h
+
+Cron
+  Status:        installed
+  Entry:         */5 * * * * cd /home/wk/projects/myapp && dispatch >> .dispatcher/logs/dispatcher.log 2>&1
+
+State
+  Paused:        no
+  Last dispatch: 2026-04-07 21:30:00
+  Database:      /home/wk/projects/myapp/.dispatcher/data.db (248.0 KB)
+
+Jobs: 4 scheduled, 1 adhoc, 0 paused
+  Scheduled:
+    cleanup-old           1w     active: always
+    db-backup             1d     active: always   timeout: 10m
+    health-check          5m     active: 06-22    timeout: 30s   retries: 3
+    upload-backup         1d     active: always   retries: 3     depends: db-backup
+  Adhoc:
+    restore               Restore a backup (run manually)
+
+Notifications
+  Mode:          failure
+  Discord:       configured
+  Ntfy:          not configured
+```
+
+Useful for debugging config issues — catches empty `${VAR}` expansions, forgotten defaults, and verifying cron is installed.
+
 ## Pausing
 
 Pause the dispatcher to prevent scheduled jobs from running while you're working on something:
