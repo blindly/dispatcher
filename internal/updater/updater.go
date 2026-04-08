@@ -14,8 +14,9 @@ import (
 const repoAPI = "https://api.github.com/repos/blindly/dispatcher/releases"
 
 type release struct {
-	TagName string  `json:"tag_name"`
-	Assets  []asset `json:"assets"`
+	TagName    string  `json:"tag_name"`
+	Prerelease bool    `json:"prerelease"`
+	Assets     []asset `json:"assets"`
 }
 
 type asset struct {
@@ -61,8 +62,41 @@ func fetchRelease(version string) (*release, error) {
 	return &rel, nil
 }
 
+func fetchLatestBeta(apiURL string) (*release, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetching releases: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+	}
+
+	var releases []release
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("parsing releases: %w", err)
+	}
+
+	for _, rel := range releases {
+		if rel.Prerelease {
+			r := rel
+			return &r, nil
+		}
+	}
+	return nil, fmt.Errorf("no beta releases found")
+}
+
 func Update(currentVersion string, targetVersion string) error {
-	rel, err := fetchRelease(targetVersion)
+	var rel *release
+	var err error
+
+	if targetVersion == "beta" {
+		rel, err = fetchLatestBeta(repoAPI)
+	} else {
+		rel, err = fetchRelease(targetVersion)
+	}
 	if err != nil {
 		return err
 	}

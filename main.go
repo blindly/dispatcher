@@ -44,7 +44,7 @@ Commands:
   watch        Live tail of job logs (all or specific job)
   install      Install crontab entry
   uninstall    Remove crontab entry
-  update       Self-update to latest release
+  update       Self-update to latest release (or 'update beta')
   version      Show current version
   docs         Show full documentation
 

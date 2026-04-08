@@ -289,7 +289,9 @@ dispatch validate        # check config syntax
 dispatch init            # create default config
 dispatch install         # add crontab entry (default: */5 * * * *)
 dispatch uninstall       # remove crontab entry
-dispatch update          # self-update to latest release
+dispatch update          # self-update to latest stable release
+dispatch update beta     # update to latest beta/pre-release
+dispatch update v1.11.0  # update to a specific version
 dispatch version         # show current version
 dispatch docs            # show full documentation
 ```
