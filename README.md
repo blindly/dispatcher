@@ -320,6 +320,45 @@ dispatch status
 dispatch uninstall
 ```
 
+## Notifications
+
+Dispatch can send summaries to Discord and/or ntfy after each run.
+
+### Global settings
+
+```yaml
+notify:
+  on: failure              # "always" (default) or "failure"
+  discord:
+    webhook: ${DISCORD_WEBHOOK_URL}
+  ntfy:
+    url: https://ntfy.sh   # default if omitted
+    topic: my-dispatch
+    token: ${NTFY_TOKEN}   # optional, for private topics
+    priority: high          # optional ntfy priority
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `notify.on` | `always` | When to notify: `always` sends after every dispatch, `failure` only when a job fails |
+| `notify.discord.webhook` | | Discord webhook URL |
+| `notify.ntfy.url` | `https://ntfy.sh` | ntfy server URL |
+| `notify.ntfy.topic` | | ntfy topic name |
+| `notify.ntfy.token` | | Auth token for private topics |
+| `notify.ntfy.priority` | | ntfy message priority |
+
+### Per-job overrides
+
+Individual jobs can set `notify: output` to forward their stdout as the notification body instead of the default summary:
+
+```yaml
+jobs:
+  status-report:
+    command: ./generate-report.sh
+    interval: 1d
+    notify: output          # sends job output as the notification
+```
+
 ## Analytics
 
 Every run is logged to a history table. Use `dispatch analytics` to see success rates and trends:
