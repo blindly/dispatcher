@@ -217,7 +217,7 @@ func main() {
 	aliases := map[string]string{
 		"ps":   "status",
 		"ls":   "list",
-		"exec": "run",
+		"exec": "run-once",
 	}
 
 	cmd := ""
