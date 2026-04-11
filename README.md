@@ -55,7 +55,7 @@ dispatch update
 dispatch init              # creates a Dispatcher.yaml with an example job
 dispatch validate          # check config syntax
 dispatch run-once hello    # test run without tracking
-dispatch install           # set up cron to run every 5 minutes
+dispatch enable            # set up cron to run every 5 minutes
 dispatch status            # see summary + cron state
 ```
 
@@ -287,8 +287,8 @@ dispatch purge           # delete old run history (uses retention config)
 dispatch purge 30d       # delete history older than 30 days
 dispatch validate        # check config syntax
 dispatch init            # create default config
-dispatch install         # add crontab entry (default: */5 * * * *)
-dispatch uninstall       # remove crontab entry
+dispatch enable          # enable scheduler (install crontab entry from config)
+dispatch disable         # disable scheduler (remove crontab entry)
 dispatch update          # self-update to latest stable release
 dispatch update beta     # update to latest beta/pre-release
 dispatch update v1.11.0  # update to a specific version
@@ -298,26 +298,28 @@ dispatch docs            # show full documentation
 
 ## Crontab integration
 
-The `schedule` field in `Dispatcher.yaml` controls how often cron fires the dispatcher. `dispatch install` reads it from the config:
+`dispatch enable` installs a crontab entry that runs the dispatcher on the schedule defined in `Dispatcher.yaml`:
 
 ```yaml
 schedule: "*/1 * * * *"   # check for due jobs every minute
 ```
 
-If omitted, defaults to `*/5 * * * *` (every 5 minutes).
+If omitted, defaults to `*/5 * * * *` (every 5 minutes). The `schedule:` field in the config is the single source of truth — there is no CLI override.
 
 ```bash
-# Install using schedule from config
-dispatch install
+# Enable scheduler using schedule from config
+dispatch enable
 
-# Override with a custom schedule
-dispatch install "*/10 * * * *"
+# Change the schedule: edit Dispatcher.yaml and re-run enable.
+# enable is idempotent — it updates the existing crontab line if
+# the schedule changed, or prints "Already enabled" if nothing changed.
+dispatch enable
 
-# Check if installed
+# Check current status
 dispatch status
 
-# Remove
-dispatch uninstall
+# Disable scheduler
+dispatch disable
 ```
 
 ## Notifications
@@ -391,7 +393,7 @@ Dispatcher
   Pause timeout: 1h
 
 Cron
-  Status:        installed
+  Status:        enabled
   Entry:         */5 * * * * cd /srv/myapp && dispatch >> .dispatcher/logs/dispatcher.log 2>&1
 
 State
@@ -414,7 +416,7 @@ Notifications
   Ntfy:          not configured
 ```
 
-Useful for debugging config issues — catches empty `${VAR}` expansions, forgotten defaults, and verifying cron is installed.
+Useful for debugging config issues — catches empty `${VAR}` expansions, forgotten defaults, and verifying the scheduler is enabled.
 
 ## Pausing
 
@@ -461,7 +463,7 @@ Dispatch runs on Windows. Most features work the same, with a few differences:
 | Discord notifications | Works | Works |
 | File locking | Works (LockFileEx) | Works (flock) |
 | Config, variables, analytics | Works | Works |
-| `dispatch install` / `uninstall` | Not supported (no crontab) | Works |
+| `dispatch enable` / `disable` | Not supported (no crontab) | Works |
 
 For scheduled execution on Windows, use Task Scheduler manually:
 
