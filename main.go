@@ -42,8 +42,8 @@ Commands:
   validate     Check config syntax
   logs         Show recent log output for a job
   watch        Live tail of job logs (all or specific job)
-  install      Install crontab entry
-  uninstall    Remove crontab entry
+  enable       Enable the scheduler (install crontab entry from config)
+  disable      Disable the scheduler (remove crontab entry)
   update       Self-update to latest release (or 'update beta')
   version      Show current version
   docs         Show full documentation
@@ -279,16 +279,12 @@ func main() {
 		configDir, _ = filepath.Abs(configDir)
 	}
 
-	// install/uninstall don't need DB
-	if cmd == "install" {
-		schedule := cfg.Schedule
-		if len(args) > 0 {
-			schedule = args[0] // CLI arg overrides config
-		}
-		enableCron(schedule, configDir)
+	// enable/disable don't need DB
+	if cmd == "enable" {
+		enableCron(cfg.Schedule, configDir)
 		return
 	}
-	if cmd == "uninstall" {
+	if cmd == "disable" {
 		disableCron(configDir)
 		return
 	}
