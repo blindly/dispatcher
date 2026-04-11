@@ -285,7 +285,7 @@ func main() {
 		if len(args) > 0 {
 			schedule = args[0] // CLI arg overrides config
 		}
-		installCron(schedule, configDir)
+		enableCron(schedule, configDir)
 		return
 	}
 	if cmd == "uninstall" {
@@ -781,35 +781,36 @@ func parseJobArgs(args []string) (extraEnv []string, extraArgs []string) {
 
 // acquireLock and releaseLock are in lock_unix.go / lock_windows.go
 
-func installCron(schedule string, projectDir string) {
+func enableCron(schedule string, projectDir string) {
 	dispatchPath, err := os.Executable()
 	if err != nil {
 		dispatchPath = "dispatch"
 	}
 	cronLine := fmt.Sprintf("%s cd %s && %s >> .dispatcher/logs/dispatcher.log 2>&1", schedule, projectDir, dispatchPath)
 
-	out, err := exec.Command("crontab", "-l").Output()
-	existing := ""
-	if err == nil {
-		existing = string(out)
+	out, _ := exec.Command("crontab", "-l").Output()
+	existing := string(out)
+
+	newContent, status := buildCrontab(existing, cronLine, projectDir)
+
+	if status == cronUnchanged {
+		fmt.Printf("Already enabled (unchanged): %s\n", cronLine)
+		return
 	}
 
-	for _, line := range strings.Split(existing, "\n") {
-		if strings.Contains(line, "dispatch") && strings.Contains(line, projectDir) {
-			fmt.Printf("Cron already installed for %s\n", projectDir)
-			fmt.Printf("  %s\n", line)
-			return
-		}
-	}
-
-	newCrontab := strings.TrimRight(existing, "\n") + "\n" + cronLine + "\n"
 	cmd := exec.Command("crontab", "-")
-	cmd.Stdin = strings.NewReader(newCrontab)
+	cmd.Stdin = strings.NewReader(newContent)
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to install crontab: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to write crontab: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Cron installed: %s\n", cronLine)
+
+	switch status {
+	case cronAdded:
+		fmt.Printf("Cron enabled: %s\n", cronLine)
+	case cronUpdated:
+		fmt.Printf("Cron updated: %s\n", cronLine)
+	}
 }
 
 func selfUpdate(targetVersion string) error {
