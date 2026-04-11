@@ -65,3 +65,30 @@ func TestBuildCrontab_OnlyMatchesThisProject(t *testing.T) {
 		t.Errorf("content = %q, want %q", content, want)
 	}
 }
+
+func TestBuildCrontab_DedupesMultipleMatches(t *testing.T) {
+	newLine := "*/5 * * * * cd /proj && /bin/dispatch >> .dispatcher/logs/dispatcher.log 2>&1"
+	oldLine := "*/2 * * * * cd /proj && /bin/dispatch >> .dispatcher/logs/dispatcher.log 2>&1"
+	existing := oldLine + "\n0 0 * * * /usr/bin/backup\n" + oldLine + "\n"
+	content, status := buildCrontab(existing, newLine, "/proj")
+	if status != cronUpdated {
+		t.Errorf("status = %v, want cronUpdated", status)
+	}
+	want := newLine + "\n0 0 * * * /usr/bin/backup\n"
+	if content != want {
+		t.Errorf("content = %q, want %q", content, want)
+	}
+}
+
+func TestBuildCrontab_DropsDuplicateEvenWhenMatchIdentical(t *testing.T) {
+	line := "*/5 * * * * cd /proj && /bin/dispatch >> .dispatcher/logs/dispatcher.log 2>&1"
+	existing := line + "\n" + line + "\n"
+	content, status := buildCrontab(existing, line, "/proj")
+	if status != cronUpdated {
+		t.Errorf("status = %v, want cronUpdated (duplicate was dropped)", status)
+	}
+	want := line + "\n"
+	if content != want {
+		t.Errorf("content = %q, want %q", content, want)
+	}
+}

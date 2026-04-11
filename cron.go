@@ -21,23 +21,26 @@ func buildCrontab(existing, newLine, projectDir string) (string, cronStatus) {
 	}
 
 	var out []string
-	matched := false
+	firstMatch := false
 	changed := false
 	for _, line := range lines {
 		if strings.Contains(line, "dispatch") && strings.Contains(line, projectDir) {
-			matched = true
-			if line != newLine {
-				changed = true
+			if !firstMatch {
+				firstMatch = true
+				if line != newLine {
+					changed = true
+				}
 				out = append(out, newLine)
 			} else {
-				out = append(out, line)
+				// Subsequent duplicate: drop it, content has changed.
+				changed = true
 			}
 		} else {
 			out = append(out, line)
 		}
 	}
 
-	if !matched {
+	if !firstMatch {
 		out = append(out, newLine)
 		return strings.Join(out, "\n") + "\n", cronAdded
 	}
