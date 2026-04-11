@@ -165,9 +165,9 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		lastDispatchStr = formatTimeAgo(now, v)
 	}
 
-	cronStatus := "not installed"
+	cronStatus := "disabled"
 	if installed, schedule := IsCronInstalled(projectDir); installed {
-		cronStatus = "installed (" + schedule + ")"
+		cronStatus = "enabled (" + schedule + ")"
 	}
 
 	statusLine := fmt.Sprintf("Last dispatch: %s", lastDispatchStr)

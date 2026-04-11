@@ -30,10 +30,10 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	// Cron
 	fmt.Println("Cron")
 	if installed, entry := display.IsCronInstalled(configDir); installed {
-		fmt.Println("  Status:        installed")
+		fmt.Println("  Status:        enabled")
 		fmt.Printf("  Entry:         %s\n", entry)
 	} else {
-		fmt.Println("  Status:        not installed")
+		fmt.Println("  Status:        disabled")
 	}
 	fmt.Println()
 
