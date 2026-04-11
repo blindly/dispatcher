@@ -289,7 +289,7 @@ func main() {
 		return
 	}
 	if cmd == "uninstall" {
-		uninstallCron(configDir)
+		disableCron(configDir)
 		return
 	}
 
@@ -835,7 +835,7 @@ func validateJob(name string, job *config.JobConfig, allJobs map[string]*config.
 	return issues
 }
 
-func uninstallCron(projectDir string) {
+func disableCron(projectDir string) {
 	out, err := exec.Command("crontab", "-l").Output()
 	if err != nil {
 		fmt.Println("No crontab found")
@@ -862,5 +862,5 @@ func uninstallCron(projectDir string) {
 		fmt.Fprintf(os.Stderr, "Failed to update crontab: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Cron removed for %s\n", projectDir)
+	fmt.Printf("Cron disabled for %s\n", projectDir)
 }
