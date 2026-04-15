@@ -42,6 +42,7 @@ Commands:
   validate     Check config syntax
   logs         Show recent log output for a job
   watch        Live tail of job logs (all or specific job)
+  notify       Send a live notification (for use inside jobs)
   enable       Enable the scheduler (install crontab entry from config)
   disable      Disable the scheduler (remove crontab entry)
   update       Self-update to latest release (or 'update beta')
@@ -296,6 +297,46 @@ func main() {
 			for _, issue := range issues {
 				fmt.Printf("  WARNING: %s\n", issue)
 			}
+		}
+		return
+	}
+
+	if cmd == "notify" {
+		if len(args) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: dispatch notify [--job NAME] <message...>")
+			os.Exit(1)
+		}
+		jobName := os.Getenv("DISPATCH_JOB")
+		var msgParts []string
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--job" && i+1 < len(args) {
+				jobName = args[i+1]
+				i++
+				continue
+			}
+			msgParts = append(msgParts, args[i])
+		}
+		if len(msgParts) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: dispatch notify [--job NAME] <message...>")
+			os.Exit(1)
+		}
+		message := strings.Join(msgParts, " ")
+
+		notifyOn := cfg.Notify.On
+		if notifyOn == "" {
+			notifyOn = "always"
+		}
+		notifyCfg := notify.NotifyConfig{
+			On:             notifyOn,
+			DiscordWebhook: cfg.Notify.Discord.Webhook,
+			NtfyURL:        cfg.Notify.Ntfy.URL,
+			NtfyTopic:      cfg.Notify.Ntfy.Topic,
+			NtfyToken:      cfg.Notify.Ntfy.Token,
+			NtfyPriority:   cfg.Notify.Ntfy.Priority,
+		}
+		if err := notify.SendLiveNotification(message, jobName, notifyCfg); err != nil {
+			fmt.Fprintf(os.Stderr, "notify: %v\n", err)
+			os.Exit(1)
 		}
 		return
 	}
