@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -312,4 +313,71 @@ func sendOutputNotification(r JobResult, cfg NotifyConfig) {
 		return
 	}
 	resp.Body.Close()
+}
+
+func SendLiveNotification(message string, jobName string, cfg NotifyConfig) error {
+	title := "Live Update"
+	if jobName != "" {
+		title = fmt.Sprintf("[%s] Live Update", jobName)
+	}
+
+	sent := false
+
+	// Discord
+	if cfg.DiscordWebhook != "" {
+		payload := map[string]interface{}{
+			"embeds": []map[string]interface{}{
+				{
+					"title":       title,
+					"color":       0x7289DA,
+					"description": message,
+					"timestamp":   time.Now().UTC().Format(time.RFC3339),
+				},
+			},
+		}
+		body, err := json.Marshal(payload)
+		if err == nil {
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Post(cfg.DiscordWebhook, "application/json", bytes.NewReader(body))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Discord live notification failed: %v\n", err)
+			} else {
+				resp.Body.Close()
+				sent = true
+			}
+		}
+	}
+
+	// ntfy
+	ntfyURL := cfg.NtfyURL
+	if ntfyURL == "" && cfg.NtfyTopic != "" {
+		ntfyURL = "https://ntfy.sh"
+	}
+	if ntfyURL != "" {
+		if cfg.NtfyTopic != "" {
+			ntfyURL = strings.TrimRight(ntfyURL, "/") + "/" + cfg.NtfyTopic
+		}
+		req, err := http.NewRequest("POST", ntfyURL, strings.NewReader(message))
+		if err == nil {
+			req.Header.Set("Title", title)
+			req.Header.Set("Priority", "default")
+			req.Header.Set("Tags", "speech_balloon")
+			if cfg.NtfyToken != "" {
+				req.Header.Set("Authorization", "Bearer "+cfg.NtfyToken)
+			}
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ntfy live notification failed: %v\n", err)
+			} else {
+				resp.Body.Close()
+				sent = true
+			}
+		}
+	}
+
+	if !sent {
+		return fmt.Errorf("no notification channels configured")
+	}
+	return nil
 }
