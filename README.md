@@ -280,6 +280,7 @@ dispatch reset <job>     # reset schedule to run now
 dispatch logs <job>      # show recent job output
 dispatch watch           # live tail all job logs
 dispatch watch <job>     # live tail a specific job
+dispatch notify "msg"    # send a live notification (from inside a job)
 dispatch history <job>   # show last 20 runs for a job
 dispatch info            # show full config, state, and job summary
 dispatch analytics       # job success rates and run history
@@ -360,6 +361,38 @@ jobs:
     interval: 1d
     notify: output          # sends job output as the notification
 ```
+
+### Live notifications
+
+Jobs can send notifications in real time while they're running, using the `dispatch notify` command:
+
+```bash
+dispatch notify "Backup 50% complete"
+dispatch notify --job mybackup "Step 3 done"
+```
+
+When a job is launched by the dispatcher, the `DISPATCH_JOB` environment variable is set automatically. The `notify` command reads it to tag notifications with the job name — no `--job` flag needed:
+
+```yaml
+jobs:
+  etl-pipeline:
+    command: python3 scripts/etl.py
+    interval: 1d
+    shell: /bin/bash
+```
+
+```python
+# scripts/etl.py
+import subprocess
+
+subprocess.run(["dispatch", "notify", "Starting extraction..."])
+# ... do work ...
+subprocess.run(["dispatch", "notify", "Extraction complete, loading 50k rows"])
+# ... do more work ...
+subprocess.run(["dispatch", "notify", "Pipeline finished"])
+```
+
+Live notifications appear on Discord with a blurple embed and on ntfy with a speech balloon tag, visually distinct from the post-run summaries.
 
 ## Analytics
 
