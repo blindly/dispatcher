@@ -575,6 +575,7 @@ func main() {
 		}
 		if job.Adhoc {
 			extraEnv, extraArgs := parseJobArgs(args[1:])
+			extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
 			rc, _, _ := runner.RunJob(conn, job, extraArgs, extraEnv)
 			if rc != 0 {
 				os.Exit(1)
@@ -599,6 +600,7 @@ func main() {
 		// Non-adhoc jobs (adhoc handled above)
 		job := cfg.Jobs[args[0]]
 		extraEnv, extraArgs := parseJobArgs(args[1:])
+		extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
 		rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify}}
 		notify.SendAll(results, notifyCfg)
@@ -612,7 +614,8 @@ func main() {
 			if job.Adhoc || job.Paused {
 				continue
 			}
-			rc, elapsed, output := runner.RunJob(conn, job, nil, nil)
+			jobEnv := []string{"DISPATCH_JOB=" + name}
+			rc, elapsed, output := runner.RunJob(conn, job, nil, jobEnv)
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 		}
 		notify.SendAll(results, notifyCfg)
@@ -687,7 +690,8 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.Notif
 				continue
 			}
 		}
-		rc, elapsed, output := runner.RunJob(conn, job, nil, nil)
+		jobEnv := []string{"DISPATCH_JOB=" + name}
+		rc, elapsed, output := runner.RunJob(conn, job, nil, jobEnv)
 		results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 	}
 
