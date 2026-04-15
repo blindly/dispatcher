@@ -153,3 +153,88 @@ func TestSendNtfySummary_NoURL(t *testing.T) {
 	results := []JobResult{{Name: "job1", ExitCode: 0, Elapsed: 1.0, Output: "ok"}}
 	SendNtfySummary(results, "", "", "", "")
 }
+
+func TestSendLiveDiscord_WithJob(t *testing.T) {
+	var gotPayload map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotPayload)
+		w.WriteHeader(204)
+	}))
+	defer server.Close()
+
+	cfg := NotifyConfig{DiscordWebhook: server.URL}
+	SendLiveNotification("Backup 50% complete", "db-backup", cfg)
+
+	embeds := gotPayload["embeds"].([]interface{})
+	embed := embeds[0].(map[string]interface{})
+
+	title := embed["title"].(string)
+	if title != "[db-backup] Live Update" {
+		t.Errorf("title = %q, want [db-backup] Live Update", title)
+	}
+
+	color := int(embed["color"].(float64))
+	if color != 0x7289DA {
+		t.Errorf("color = %x, want 7289DA", color)
+	}
+
+	desc := embed["description"].(string)
+	if desc != "Backup 50% complete" {
+		t.Errorf("description = %q, want message text", desc)
+	}
+}
+
+func TestSendLiveDiscord_NoJob(t *testing.T) {
+	var gotPayload map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotPayload)
+		w.WriteHeader(204)
+	}))
+	defer server.Close()
+
+	cfg := NotifyConfig{DiscordWebhook: server.URL}
+	SendLiveNotification("Something happened", "", cfg)
+
+	embeds := gotPayload["embeds"].([]interface{})
+	embed := embeds[0].(map[string]interface{})
+
+	title := embed["title"].(string)
+	if title != "Live Update" {
+		t.Errorf("title = %q, want Live Update", title)
+	}
+}
+
+func TestSendLiveNtfy_WithJob(t *testing.T) {
+	var gotTitle, gotTags, gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTitle = r.Header.Get("Title")
+		gotTags = r.Header.Get("Tags")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	cfg := NotifyConfig{NtfyURL: server.URL}
+	SendLiveNotification("Step 3 done", "db-backup", cfg)
+
+	if gotTitle != "[db-backup] Live Update" {
+		t.Errorf("title = %q, want [db-backup] Live Update", gotTitle)
+	}
+	if gotTags != "speech_balloon" {
+		t.Errorf("tags = %q, want speech_balloon", gotTags)
+	}
+	if gotBody != "Step 3 done" {
+		t.Errorf("body = %q, want message text", gotBody)
+	}
+}
+
+func TestSendLiveNotification_NoChannels(t *testing.T) {
+	cfg := NotifyConfig{}
+	err := SendLiveNotification("hello", "test", cfg)
+	if err == nil {
+		t.Error("expected error when no channels configured")
+	}
+}
