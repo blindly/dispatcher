@@ -434,6 +434,7 @@ func main() {
 			os.Exit(1)
 		}
 		extraEnv, extraArgs := parseJobArgs(args[1:])
+		extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
 		rc, output := runner.RunOnce(job, extraArgs, extraEnv)
 		if strings.TrimSpace(output) != "" {
 			fmt.Print(output)
