@@ -218,7 +218,10 @@ func TestSendLiveNtfy_WithJob(t *testing.T) {
 	defer server.Close()
 
 	cfg := NotifyConfig{NtfyURL: server.URL}
-	SendLiveNotification("Step 3 done", "db-backup", cfg)
+	err := SendLiveNotification("Step 3 done", "db-backup", cfg)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 
 	if gotTitle != "[db-backup] Live Update" {
 		t.Errorf("title = %q, want [db-backup] Live Update", gotTitle)
