@@ -37,7 +37,7 @@ Commands:
   resume       Resume scheduled dispatch
   info         Show dispatcher configuration and state
   reset        Reset a job's next_run to now
-  retry-failed Reset all failed jobs to run next cycle
+  retry        Reset all failed jobs to run next cycle
   purge        Delete old run history (default: retention config)
   validate     Check config syntax
   logs         Show recent log output for a job
@@ -521,7 +521,7 @@ func main() {
 		return
 	}
 
-	if cmd == "retry-failed" {
+	if cmd == "retry-failed" || cmd == "retry" {
 		now := db.NowUTC().Format(time.RFC3339)
 		rows, err := conn.Query("SELECT name FROM cron_jobs WHERE last_status LIKE 'failed%'")
 		if err != nil {
