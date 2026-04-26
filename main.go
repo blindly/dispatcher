@@ -435,7 +435,7 @@ func main() {
 		}
 		extraEnv, extraArgs := parseJobArgs(args[1:])
 		extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
-		rc, output := runner.RunOnce(job, extraArgs, extraEnv)
+		rc, output := runner.RunOnceInteractive(job, extraArgs, extraEnv)
 		if strings.TrimSpace(output) != "" {
 			fmt.Print(output)
 		}
@@ -577,7 +577,7 @@ func main() {
 		if job.Adhoc {
 			extraEnv, extraArgs := parseJobArgs(args[1:])
 			extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
-			rc, _, _ := runner.RunJob(conn, job, extraArgs, extraEnv)
+			rc, _, _ := runner.RunJobInteractive(conn, job, extraArgs, extraEnv)
 			if rc != 0 {
 				os.Exit(1)
 			}
@@ -602,7 +602,7 @@ func main() {
 		job := cfg.Jobs[args[0]]
 		extraEnv, extraArgs := parseJobArgs(args[1:])
 		extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
-		rc, elapsed, output := runner.RunJob(conn, job, extraArgs, extraEnv)
+		rc, elapsed, output := runner.RunJobInteractive(conn, job, extraArgs, extraEnv)
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify}}
 		notify.SendAll(results, notifyCfg)
 		if rc != 0 {
@@ -616,7 +616,7 @@ func main() {
 				continue
 			}
 			jobEnv := []string{"DISPATCH_JOB=" + name}
-			rc, elapsed, output := runner.RunJob(conn, job, nil, jobEnv)
+			rc, elapsed, output := runner.RunJobInteractive(conn, job, nil, jobEnv)
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 		}
 		notify.SendAll(results, notifyCfg)

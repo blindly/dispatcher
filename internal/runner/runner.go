@@ -17,6 +17,7 @@ import (
 	"github.com/blindly/dispatcher/internal/config"
 	"github.com/blindly/dispatcher/internal/db"
 	"github.com/blindly/dispatcher/internal/display"
+	"github.com/mattn/go-isatty"
 )
 
 var logBaseDir string
@@ -45,10 +46,21 @@ func writeLog(f *os.File, content string) {
 	}
 }
 
-func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []string, extraEnv []string, logFile *os.File) (int, string) {
+func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []string, extraEnv []string, logFile *os.File, interactive bool) (int, string) {
 	var cmd *exec.Cmd
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	// Under TTY mode (interactive + real TTY on stdin), don't apply the
+	// dispatch timeout — ad-hoc commands like `tail -f` should run until
+	// the user interrupts them.
+	useTTY := interactive && stdinIsTTY()
+
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if useTTY {
+		ctx, cancel = context.WithCancel(context.Background())
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	}
 	defer cancel()
 
 	if job.Shell != "" {
@@ -78,6 +90,13 @@ func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []
 		cmd.Dir = job.Dir
 	}
 
+	if useTTY {
+		// Allocate a PTY, put parent stdin into raw mode, forward
+		// SIGWINCH, and stream both directions. Skip log capture
+		// because the PTY stream contains ANSI escape codes.
+		return runCommandTTY(cmd, timeout)
+	}
+
 	// Stream output to both a buffer and the log file
 	var buf bytes.Buffer
 	if logFile != nil {
@@ -102,10 +121,14 @@ func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []
 }
 
 func RunOnce(job *config.JobConfig, extraArgs []string, extraEnv []string) (int, string) {
-	return runOnceWithLog(job, extraArgs, extraEnv, nil)
+	return runOnceWithLog(job, extraArgs, extraEnv, nil, false)
 }
 
-func runOnceWithLog(job *config.JobConfig, extraArgs []string, extraEnv []string, logFile *os.File) (int, string) {
+func RunOnceInteractive(job *config.JobConfig, extraArgs []string, extraEnv []string) (int, string) {
+	return runOnceWithLog(job, extraArgs, extraEnv, nil, true)
+}
+
+func runOnceWithLog(job *config.JobConfig, extraArgs []string, extraEnv []string, logFile *os.File, interactive bool) (int, string) {
 	if len(job.Commands) == 0 {
 		return -2, "empty command"
 	}
@@ -120,13 +143,13 @@ func runOnceWithLog(job *config.JobConfig, extraArgs []string, extraEnv []string
 	for _, command := range job.Commands {
 		if strings.Contains(command, "{{.CLI_ARGS}}") {
 			command = strings.ReplaceAll(command, "{{.CLI_ARGS}}", cliArgs)
-			rc, output := runCommand(command, job, timeout, nil, extraEnv, logFile)
+			rc, output := runCommand(command, job, timeout, nil, extraEnv, logFile, interactive)
 			allOutput.WriteString(output)
 			if rc != 0 {
 				return rc, allOutput.String()
 			}
 		} else {
-			rc, output := runCommand(command, job, timeout, extraArgs, extraEnv, logFile)
+			rc, output := runCommand(command, job, timeout, extraArgs, extraEnv, logFile, interactive)
 			allOutput.WriteString(output)
 			if rc != 0 {
 				return rc, allOutput.String()
@@ -137,21 +160,37 @@ func runOnceWithLog(job *config.JobConfig, extraArgs []string, extraEnv []string
 }
 
 func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []string) (int, float64, string) {
+	return runJob(conn, job, extraArgs, extraEnv, false)
+}
+
+func RunJobInteractive(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []string) (int, float64, string) {
+	return runJob(conn, job, extraArgs, extraEnv, true)
+}
+
+func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []string, interactive bool) (int, float64, string) {
 	now := db.NowUTC()
 	ts := display.FormatTimestamp(now)
 	header := fmt.Sprintf("[%s] START %s — %s\n", ts, job.Name, job.Description)
 	fmt.Print(header)
 
-	logFile := openJobLog(job.Name)
-	if logFile != nil {
-		defer logFile.Close()
+	// Skip log capture entirely when running under a real TTY — the
+	// PTY stream contains ANSI escape codes and would pollute logs.
+	var logFile *os.File
+	if !(interactive && stdinIsTTY()) {
+		logFile = openJobLog(job.Name)
+		if logFile != nil {
+			defer logFile.Close()
+		}
+		writeLog(logFile, header)
 	}
-	writeLog(logFile, header)
 
 	db.MarkRunning(conn, job.Name)
 	defer db.ClearRunning(conn, job.Name)
 
-	// Handle Ctrl+C — clear running state before exit
+	// Handle Ctrl+C — clear running state before exit.
+	// In TTY mode the child process owns the terminal and gets SIGINT
+	// directly via the controlling TTY, so we still want to clean up DB
+	// state if the user interrupts the parent dispatch process.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -162,7 +201,7 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	defer signal.Stop(sigCh)
 
 	start := time.Now()
-	rc, output := runOnceWithLog(job, extraArgs, extraEnv, logFile)
+	rc, output := runOnceWithLog(job, extraArgs, extraEnv, logFile, interactive)
 
 	attempt := 1
 	for rc != 0 && rc != -1 && attempt <= job.Retries {
@@ -171,7 +210,7 @@ func RunJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 		fmt.Print(retryMsg)
 		writeLog(logFile, retryMsg)
 		time.Sleep(time.Duration(job.RetryDelay) * time.Second)
-		rc, output = runOnceWithLog(job, extraArgs, extraEnv, logFile)
+		rc, output = runOnceWithLog(job, extraArgs, extraEnv, logFile, interactive)
 		attempt++
 	}
 
@@ -227,3 +266,11 @@ func ResolveOrder(due []string, jobs map[string]*config.JobConfig) []string {
 	}
 	return ordered
 }
+
+// stdinIsTTY reports whether the parent process's stdin is connected to
+// a terminal. Implemented as a var so tests can override it if needed.
+var stdinIsTTY = func() bool {
+	return isatty.IsTerminal(os.Stdin.Fd())
+}
+
+// runCommandTTY is implemented per-platform in tty_unix.go and tty_windows.go.

@@ -39,7 +39,27 @@ func TestRunOnce_Failure(t *testing.T) {
 	}
 }
 
+// pinNoTTY overrides stdinIsTTY to always return false for the duration of the
+// test, ensuring TTY-fallback tests behave consistently regardless of whether
+// the test runner is attached to a real terminal.
+func pinNoTTY(t *testing.T) {
+	t.Helper()
+	orig := stdinIsTTY
+	stdinIsTTY = func() bool { return false }
+	t.Cleanup(func() { stdinIsTTY = orig })
+}
+
+// withTempLogDir redirects per-job log output to t.TempDir() so that tests
+// never write into the source-tree logs/ directory.
+func withTempLogDir(t *testing.T) {
+	t.Helper()
+	orig := logBaseDir
+	logBaseDir = t.TempDir()
+	t.Cleanup(func() { logBaseDir = orig })
+}
+
 func TestRunJob_UpdatesDB(t *testing.T) {
+	withTempLogDir(t)
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	conn, err := db.Open(dbPath)
 	if err != nil {
@@ -260,5 +280,49 @@ func TestResolveOrder_DepNotDue(t *testing.T) {
 	ordered := ResolveOrder(due, jobs)
 	if len(ordered) != 1 || ordered[0] != "scan" {
 		t.Errorf("got %v, want [scan]", ordered)
+	}
+}
+
+func TestRunOnceInteractive_FallsBackWhenNoTTY(t *testing.T) {
+	pinNoTTY(t)
+	// With stdinIsTTY pinned to false, interactive mode must transparently
+	// fall back to the buffered path regardless of the test environment.
+	job := &config.JobConfig{
+		Name:     "interactive_fallback",
+		Commands: []string{"echo hello"},
+	}
+	rc, output := RunOnceInteractive(job, nil, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "hello") {
+		t.Errorf("output = %q, want to contain 'hello'", output)
+	}
+}
+
+func TestRunJobInteractive_FallsBackWhenNoTTY(t *testing.T) {
+	pinNoTTY(t)
+	withTempLogDir(t)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	job := &config.JobConfig{
+		Name:            "interactive_job_fallback",
+		Commands:        []string{"echo hello"},
+		IntervalSeconds: 300,
+	}
+	jobs := map[string]*config.JobConfig{"interactive_job_fallback": job}
+	db.EnsureJobs(conn, jobs)
+
+	rc, _, output := RunJobInteractive(conn, job, nil, nil)
+	if rc != 0 {
+		t.Errorf("rc = %d, want 0", rc)
+	}
+	if !strings.Contains(output, "hello") {
+		t.Errorf("output = %q, want to contain 'hello'", output)
 	}
 }

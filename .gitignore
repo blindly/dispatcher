@@ -2,3 +2,4 @@ dispatch
 .dispatcher/
 .env
 CLAUDE.md
+internal/runner/logs/
