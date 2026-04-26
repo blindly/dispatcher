@@ -326,3 +326,68 @@ func TestRunJobInteractive_FallsBackWhenNoTTY(t *testing.T) {
 		t.Errorf("output = %q, want to contain 'hello'", output)
 	}
 }
+
+func TestIsInterrupted(t *testing.T) {
+	// Bash convention: 128 + signal number.
+	cases := map[int]bool{
+		0:   false,
+		1:   false,
+		-1:  false, // timeout sentinel
+		-2:  false, // internal error sentinel
+		129: true,  // SIGHUP
+		130: true,  // SIGINT (Ctrl+C)
+		143: true,  // SIGTERM
+		137: false, // SIGKILL — not user-initiated; still a failure
+		131: false, // SIGQUIT — not in the user-meaningful set
+	}
+	for rc, want := range cases {
+		if got := isInterrupted(rc); got != want {
+			t.Errorf("isInterrupted(%d) = %v, want %v", rc, got, want)
+		}
+	}
+}
+
+func TestRunJob_InterruptedSkipsRetriesAndDoesNotCountAsFailure(t *testing.T) {
+	withTempLogDir(t)
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	// Use the buffered path (interactive=false) and a shell command that
+	// kills itself with SIGINT — simulating what the PTY path would do
+	// when the user hits Ctrl+C. Bash translates "kill -INT $$" to exit
+	// status 130 from the perspective of the parent.
+	job := &config.JobConfig{
+		Name:            "interrupt_retry_test",
+		Commands:        []string{"kill -INT $$"},
+		Shell:           "/bin/bash",
+		IntervalSeconds: 300,
+		Retries:         3, // would fire 3 retries if the rc weren't interrupted
+		RetryDelay:      0,
+	}
+	jobs := map[string]*config.JobConfig{"interrupt_retry_test": job}
+	db.EnsureJobs(conn, jobs)
+
+	rc, _, _ := RunJob(conn, job, nil, nil)
+	if !isInterrupted(rc) {
+		t.Fatalf("expected interrupted rc, got %d", rc)
+	}
+
+	var runCount, failCount int
+	var status string
+	conn.QueryRow("SELECT run_count, fail_count, last_status FROM cron_jobs WHERE name = ?",
+		"interrupt_retry_test").Scan(&runCount, &failCount, &status)
+
+	if runCount != 1 {
+		t.Errorf("run_count = %d, want 1 (retries should be skipped on interrupt)", runCount)
+	}
+	if failCount != 0 {
+		t.Errorf("fail_count = %d, want 0 (interrupted runs must not count as failures)", failCount)
+	}
+	if status != "interrupted" {
+		t.Errorf("status = %q, want %q", status, "interrupted")
+	}
+}

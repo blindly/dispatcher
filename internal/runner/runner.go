@@ -113,6 +113,9 @@ func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []
 			return -1, fmt.Sprintf("TIMEOUT after %ds", timeout)
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			if rc := signalRC(exitErr); rc != 0 {
+				return rc, buf.String()
+			}
 			return exitErr.ExitCode(), buf.String()
 		}
 		return -2, err.Error()
@@ -204,7 +207,7 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	rc, output := runOnceWithLog(job, extraArgs, extraEnv, logFile, interactive)
 
 	attempt := 1
-	for rc != 0 && rc != -1 && attempt <= job.Retries {
+	for rc != 0 && rc != -1 && !isInterrupted(rc) && attempt <= job.Retries {
 		retryMsg := fmt.Sprintf("  [RETRY %d/%d] %s failed (rc=%d), retrying in %ds...\n",
 			attempt, job.Retries, job.Name, rc, job.RetryDelay)
 		fmt.Print(retryMsg)
@@ -220,7 +223,9 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 
 	elapsed := time.Since(start).Seconds()
 	status := "ok"
-	if rc != 0 {
+	if isInterrupted(rc) {
+		status = "interrupted"
+	} else if rc != 0 {
 		status = fmt.Sprintf("failed:%d", rc)
 	} else if attempt > 1 {
 		status = fmt.Sprintf("ok:retry%d", attempt-1)
@@ -229,7 +234,9 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	db.UpdateAfterRun(conn, job.Name, job.IntervalSeconds, rc, elapsed, status)
 
 	icon := "OK"
-	if rc != 0 {
+	if isInterrupted(rc) {
+		icon = "INTERRUPTED"
+	} else if rc != 0 {
 		icon = "FAIL"
 	} else if attempt > 1 {
 		icon = fmt.Sprintf("OK (retry %d)", attempt-1)
@@ -271,6 +278,14 @@ func ResolveOrder(due []string, jobs map[string]*config.JobConfig) []string {
 // a terminal. Implemented as a var so tests can override it if needed.
 var stdinIsTTY = func() bool {
 	return isatty.IsTerminal(os.Stdin.Fd())
+}
+
+// isInterrupted reports whether rc indicates the child was killed by
+// a user-meaningful signal (SIGHUP, SIGINT, SIGTERM) — bash convention
+// of 128+sig. Used to classify TTY Ctrl+C as "interrupted" rather than
+// "failed" and to suppress the retry loop on those exits.
+func isInterrupted(rc int) bool {
+	return rc == 129 || rc == 130 || rc == 143
 }
 
 // runCommandTTY is implemented per-platform in tty_unix.go and tty_windows.go.

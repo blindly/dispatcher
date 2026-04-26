@@ -145,6 +145,43 @@ func TestUpdateAfterRun(t *testing.T) {
 	}
 }
 
+func TestUpdateAfterRun_InterruptedDoesNotBumpFailCount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	now := NowUTC().Format(time.RFC3339)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "interrupt_test", now)
+
+	// Simulate a Ctrl+C: rc=130 (SIGINT) but status="interrupted".
+	// run_count should bump, fail_count should NOT.
+	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "interrupted")
+
+	var runCount, failCount int
+	var status string
+	conn.QueryRow("SELECT run_count, fail_count, last_status FROM cron_jobs WHERE name = ?",
+		"interrupt_test").Scan(&runCount, &failCount, &status)
+	if runCount != 1 {
+		t.Errorf("run_count = %d, want 1", runCount)
+	}
+	if failCount != 0 {
+		t.Errorf("fail_count = %d, want 0 (interrupted runs must not count as failures)", failCount)
+	}
+	if status != "interrupted" {
+		t.Errorf("status = %q, want %q", status, "interrupted")
+	}
+
+	// Sanity check: a regular failure with the same rc still bumps fail_count.
+	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "failed:130")
+	conn.QueryRow("SELECT fail_count FROM cron_jobs WHERE name = ?", "interrupt_test").Scan(&failCount)
+	if failCount != 1 {
+		t.Errorf("fail_count after non-interrupted failure = %d, want 1", failCount)
+	}
+}
+
 func TestGetAnalytics(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	conn, err := Open(dbPath)

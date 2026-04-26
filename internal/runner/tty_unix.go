@@ -76,6 +76,12 @@ func runCommandTTY(cmd *exec.Cmd, _ int) (int, string) {
 	err = cmd.Wait()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			// Ctrl+C in the PTY is delivered to the child as SIGINT via the
+			// terminal line discipline. signalRC surfaces it as 128+sig so
+			// runJob can classify the exit as "interrupted" not "failed".
+			if rc := signalRC(exitErr); rc != 0 {
+				return rc, ""
+			}
 			return exitErr.ExitCode(), ""
 		}
 		return -2, err.Error()

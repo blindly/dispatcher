@@ -168,7 +168,7 @@ func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapse
 	now := NowUTC()
 	nextRun := now.Add(time.Duration(intervalSeconds) * time.Second).Format(time.RFC3339)
 	failInc := 0
-	if rc != 0 {
+	if rc != 0 && status != "interrupted" {
 		failInc = 1
 	}
 	db.Exec(
