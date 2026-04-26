@@ -298,9 +298,9 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 
 	if len(adhoc) > 0 {
 		fmt.Printf("\nAdhoc Jobs\n")
-		fmt.Printf("%-30s  %-19s  %10s  %5s  %5s\n",
+		fmt.Printf("%-30s  %-19s  %15s  %5s  %5s\n",
 			"Name", "Last Run", "Status", "Runs", "Fails")
-		fmt.Println(strings.Repeat("-", 80))
+		fmt.Println(strings.Repeat("-", 85))
 
 		for _, r := range adhoc {
 			lr := "-"
@@ -313,7 +313,7 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 			} else if r.status.Valid {
 				st = r.status.String
 			}
-			fmt.Printf("%-30s  %-19s  %10s  %5d  %5d\n",
+			fmt.Printf("%-30s  %-19s  %15s  %5d  %5d\n",
 				r.name, lr, st, r.runCount, r.failCount)
 		}
 	}
