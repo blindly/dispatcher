@@ -114,6 +114,99 @@ func TestGetDueJobs_FiltersActiveHours(t *testing.T) {
 	}
 }
 
+func TestIsOnActiveDay_Nil(t *testing.T) {
+	if !IsOnActiveDay(nil, "America/New_York") {
+		t.Error("nil days should always be active")
+	}
+}
+
+func TestIsOnActiveDay_Today(t *testing.T) {
+	tz := "America/New_York"
+	loc, _ := time.LoadLocation(tz)
+	today := int(time.Now().In(loc).Weekday())
+
+	var days [7]bool
+	days[today] = true
+	if !IsOnActiveDay(&days, tz) {
+		t.Errorf("today (weekday=%d) should be active", today)
+	}
+}
+
+func TestIsOnActiveDay_NotToday(t *testing.T) {
+	tz := "America/New_York"
+	loc, _ := time.LoadLocation(tz)
+	today := int(time.Now().In(loc).Weekday())
+	notToday := (today + 3) % 7
+
+	var days [7]bool
+	days[notToday] = true
+	if IsOnActiveDay(&days, tz) {
+		t.Errorf("only weekday=%d enabled, today=%d — should be filtered", notToday, today)
+	}
+}
+
+func TestGetDueJobs_FiltersActiveDays(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	past := NowUTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "wrong_day", past)
+
+	// Enable only the weekday 3 days from today — guaranteed not to be today.
+	tz := "America/New_York"
+	loc, _ := time.LoadLocation(tz)
+	today := int(time.Now().In(loc).Weekday())
+	notToday := (today + 3) % 7
+	var days [7]bool
+	days[notToday] = true
+
+	jobs := map[string]*config.JobConfig{
+		"wrong_day": {Name: "wrong_day", Commands: []string{"echo"}, IntervalSeconds: 300, ActiveDays: &days},
+	}
+	due := GetDueJobs(conn, jobs, tz)
+	for _, name := range due {
+		if name == "wrong_day" {
+			t.Error("wrong_day should be filtered by active days")
+		}
+	}
+}
+
+func TestGetDueJobs_HoursAndDaysCombined(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	past := NowUTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "right_day_wrong_hour", past)
+
+	tz := "America/New_York"
+	loc, _ := time.LoadLocation(tz)
+	today := int(time.Now().In(loc).Weekday())
+	var days [7]bool
+	days[today] = true               // day matches
+	hours := [2]int{3, 4}            // hour almost certainly does not
+
+	jobs := map[string]*config.JobConfig{
+		"right_day_wrong_hour": {
+			Name: "right_day_wrong_hour", Commands: []string{"echo"}, IntervalSeconds: 300,
+			ActiveHours: &hours, ActiveDays: &days,
+		},
+	}
+	due := GetDueJobs(conn, jobs, tz)
+	for _, name := range due {
+		if name == "right_day_wrong_hour" {
+			t.Error("hour filter should still apply when day matches")
+		}
+	}
+}
+
 func TestUpdateAfterRun(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	conn, err := Open(dbPath)

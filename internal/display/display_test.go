@@ -45,6 +45,48 @@ func TestFormatDt_Empty(t *testing.T) {
 	}
 }
 
+func TestFormatActive_Default(t *testing.T) {
+	if got := formatActive(nil, nil); got != "always" {
+		t.Errorf("got %q, want always", got)
+	}
+}
+
+func TestFormatActive_HoursOnly(t *testing.T) {
+	hours := [2]int{9, 17}
+	if got := formatActive(nil, &hours); got != "09-17" {
+		t.Errorf("got %q, want 09-17", got)
+	}
+}
+
+func TestFormatActive_Weekdays(t *testing.T) {
+	days := [7]bool{false, true, true, true, true, true, false}
+	if got := formatActive(&days, nil); got != "M-F" {
+		t.Errorf("got %q, want M-F", got)
+	}
+}
+
+func TestFormatActive_Weekends(t *testing.T) {
+	days := [7]bool{true, false, false, false, false, false, true}
+	if got := formatActive(&days, nil); got != "S-S" {
+		t.Errorf("got %q, want S-S", got)
+	}
+}
+
+func TestFormatActive_ArbitraryDays(t *testing.T) {
+	days := [7]bool{false, true, false, true, false, true, false} // Mon, Wed, Fri
+	if got := formatActive(&days, nil); got != "Mo,We,Fr" {
+		t.Errorf("got %q, want Mo,We,Fr", got)
+	}
+}
+
+func TestFormatActive_Combined(t *testing.T) {
+	days := [7]bool{false, true, true, true, true, true, false}
+	hours := [2]int{9, 17}
+	if got := formatActive(&days, &hours); got != "M-F 09-17" {
+		t.Errorf("got %q, want M-F 09-17", got)
+	}
+}
+
 func TestPrintQuickStatus(t *testing.T) {
 	// Just verify it doesn't panic with an empty DB
 	dbPath := filepath.Join(t.TempDir(), "test.db")

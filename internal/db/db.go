@@ -136,6 +136,17 @@ func IsInActiveHours(hours *[2]int, tzName string) bool {
 	return nowHour >= start || nowHour < end
 }
 
+func IsOnActiveDay(days *[7]bool, tzName string) bool {
+	if days == nil {
+		return true
+	}
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		return true
+	}
+	return days[int(time.Now().In(loc).Weekday())]
+}
+
 func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {
 	now := NowUTC().Format(time.RFC3339)
 	rows, err := db.Query("SELECT name, force_next FROM cron_jobs WHERE next_run_at <= ? ORDER BY next_run_at", now)
@@ -156,7 +167,7 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 		if job.Adhoc || job.Paused {
 			continue
 		}
-		if forceNext == 0 && !IsInActiveHours(job.ActiveHours, tzName) {
+		if forceNext == 0 && (!IsInActiveHours(job.ActiveHours, tzName) || !IsOnActiveDay(job.ActiveDays, tzName)) {
 			continue
 		}
 		due = append(due, name)

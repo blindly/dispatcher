@@ -584,6 +584,182 @@ jobs:
 	}
 }
 
+func TestParseDays_Empty(t *testing.T) {
+	got, err := parseDays(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("got %v, want nil for empty input", got)
+	}
+}
+
+func TestParseDays_Weekdays(t *testing.T) {
+	got, err := parseDays([]string{"weekdays"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("got nil, want [7]bool")
+	}
+	want := [7]bool{false, true, true, true, true, true, false} // Sun..Sat
+	if *got != want {
+		t.Errorf("got %v, want %v", *got, want)
+	}
+}
+
+func TestParseDays_Weekends(t *testing.T) {
+	got, err := parseDays([]string{"weekends"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("got nil")
+	}
+	want := [7]bool{true, false, false, false, false, false, true} // Sun, Sat
+	if *got != want {
+		t.Errorf("got %v, want %v", *got, want)
+	}
+}
+
+func TestParseDays_All(t *testing.T) {
+	got, err := parseDays([]string{"all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("got nil")
+	}
+	for i, v := range got {
+		if !v {
+			t.Errorf("day %d = false, want true", i)
+		}
+	}
+}
+
+func TestParseDays_NamedList(t *testing.T) {
+	got, err := parseDays([]string{"sat", "sun"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [7]bool{true, false, false, false, false, false, true}
+	if got == nil || *got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseDays_CaseInsensitive(t *testing.T) {
+	got, err := parseDays([]string{"MON", "Wed", "fri"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [7]bool{false, true, false, true, false, true, false}
+	if got == nil || *got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseDays_Unknown(t *testing.T) {
+	_, err := parseDays([]string{"funday"})
+	if err == nil {
+		t.Error("expected error for unknown day name")
+	}
+}
+
+func TestParseDays_KeywordMixedWithNamesIsError(t *testing.T) {
+	// Keywords must be standalone — combining is ambiguous.
+	_, err := parseDays([]string{"weekdays", "sat"})
+	if err == nil {
+		t.Error("expected error when mixing keyword with day names")
+	}
+}
+
+func TestLoad_DaysKeyword(t *testing.T) {
+	yaml := `
+jobs:
+  weekendly:
+    command: echo hi
+    interval: 1h
+    days: weekends
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["weekendly"]
+	if job.ActiveDays == nil {
+		t.Fatal("ActiveDays = nil, want set")
+	}
+	want := [7]bool{true, false, false, false, false, false, true}
+	if *job.ActiveDays != want {
+		t.Errorf("ActiveDays = %v, want %v", *job.ActiveDays, want)
+	}
+}
+
+func TestLoad_DaysList(t *testing.T) {
+	yaml := `
+jobs:
+  saturday_only:
+    command: echo hi
+    interval: 1h
+    days: [sat]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["saturday_only"]
+	if job.ActiveDays == nil || !job.ActiveDays[6] || job.ActiveDays[0] {
+		t.Errorf("ActiveDays = %v, want only Sat=true", job.ActiveDays)
+	}
+}
+
+func TestLoad_DaysOmittedIsNil(t *testing.T) {
+	yaml := `
+jobs:
+  daily:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Jobs["daily"].ActiveDays != nil {
+		t.Errorf("ActiveDays = %v, want nil when omitted", cfg.Jobs["daily"].ActiveDays)
+	}
+}
+
+func TestLoad_DaysInvalid(t *testing.T) {
+	yaml := `
+jobs:
+  bad:
+    command: echo hi
+    interval: 1h
+    days: [funday]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for unknown day name")
+	}
+}
+
 func TestLoad_PauseTimeoutCustom(t *testing.T) {
 	yaml := `
 pause_timeout: 2h

@@ -182,6 +182,7 @@ jobs:
     # adhoc: true
     # timeout: 5m
     # active_hours: [9, 17]
+    # days: weekdays   # or weekends, all, or [mon, wed, fri]
     # depends_on: other_job
     # retries: 2
     # retry_delay: 5s

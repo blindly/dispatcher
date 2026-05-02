@@ -16,6 +16,7 @@ type JobConfig struct {
 	IntervalSeconds int
 	Description     string            `yaml:"description"`
 	ActiveHours     *[2]int           `yaml:"-"`
+	ActiveDays      *[7]bool          `yaml:"-"` // indexed by time.Weekday: Sun=0..Sat=6; nil = every day
 	DependsOn       string            `yaml:"depends_on"`
 	Retries         int               `yaml:"retries"`
 	RetryDelay      int               `yaml:"-"` // seconds, parsed from retry_delay
@@ -77,6 +78,7 @@ type rawJob struct {
 	Interval    string            `yaml:"interval"`
 	Description string            `yaml:"description"`
 	ActiveHours []int             `yaml:"active_hours"`
+	Days        stringOrList      `yaml:"days"`
 	DependsOn   string            `yaml:"depends_on"`
 	Retries     *int              `yaml:"retries"`
 	RetryDelay  string            `yaml:"retry_delay"`
@@ -98,6 +100,44 @@ type rawConfig struct {
 	PauseTimeout   string            `yaml:"pause_timeout"`
 	DiscordWebhook string            `yaml:"discord_webhook"`
 	Vars           map[string]string `yaml:"vars"`
+}
+
+var dayNames = map[string]int{
+	"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6,
+}
+
+// parseDays parses a list of day names or a single keyword (weekdays / weekends / all)
+// into a [7]bool indexed by time.Weekday. Returns nil for empty input ("every day").
+func parseDays(days []string) (*[7]bool, error) {
+	if len(days) == 0 {
+		return nil, nil
+	}
+	var out [7]bool
+	if len(days) == 1 {
+		switch strings.ToLower(strings.TrimSpace(days[0])) {
+		case "weekdays":
+			out = [7]bool{false, true, true, true, true, true, false}
+			return &out, nil
+		case "weekends":
+			out = [7]bool{true, false, false, false, false, false, true}
+			return &out, nil
+		case "all":
+			out = [7]bool{true, true, true, true, true, true, true}
+			return &out, nil
+		}
+	}
+	for _, d := range days {
+		key := strings.ToLower(strings.TrimSpace(d))
+		if _, isKeyword := map[string]bool{"weekdays": true, "weekends": true, "all": true}[key]; isKeyword {
+			return nil, fmt.Errorf("days: keyword %q must be standalone, not combined with other entries", key)
+		}
+		idx, ok := dayNames[key]
+		if !ok {
+			return nil, fmt.Errorf("days: unknown day %q (want sun mon tue wed thu fri sat or weekdays/weekends/all)", d)
+		}
+		out[idx] = true
+	}
+	return &out, nil
 }
 
 var intervalRe = regexp.MustCompile(`^(\d+)([smhdw])$`)
@@ -290,6 +330,12 @@ func Load(path string) (*DispatcherConfig, error) {
 		if len(rj.ActiveHours) == 2 {
 			job.ActiveHours = &[2]int{rj.ActiveHours[0], rj.ActiveHours[1]}
 		}
+
+		activeDays, err := parseDays(rj.Days)
+		if err != nil {
+			return nil, fmt.Errorf("job %q: %w", name, err)
+		}
+		job.ActiveDays = activeDays
 
 		cfg.Jobs[name] = job
 	}

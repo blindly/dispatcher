@@ -11,6 +11,39 @@ import (
 	"github.com/blindly/dispatcher/internal/db"
 )
 
+var dayAbbr = [7]string{"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
+
+// formatActive renders the days+hours filter for the "Active" column.
+// nil days, nil hours → "always".
+func formatActive(days *[7]bool, hours *[2]int) string {
+	var parts []string
+	if days != nil {
+		weekdays := [7]bool{false, true, true, true, true, true, false}
+		weekends := [7]bool{true, false, false, false, false, false, true}
+		switch *days {
+		case weekdays:
+			parts = append(parts, "M-F")
+		case weekends:
+			parts = append(parts, "S-S")
+		default:
+			var names []string
+			for i, on := range days {
+				if on {
+					names = append(names, dayAbbr[i])
+				}
+			}
+			parts = append(parts, strings.Join(names, ","))
+		}
+	}
+	if hours != nil {
+		parts = append(parts, fmt.Sprintf("%02d-%02d", hours[0], hours[1]))
+	}
+	if len(parts) == 0 {
+		return "always"
+	}
+	return strings.Join(parts, " ")
+}
+
 func FormatInterval(seconds int) string {
 	switch {
 	case seconds >= 604800:
@@ -149,7 +182,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		}
 
 		if !job.Adhoc && !job.Paused && nextRun <= now.Format(time.RFC3339) {
-			if forceNext == 1 || db.IsInActiveHours(job.ActiveHours, tzName) {
+			if forceNext == 1 || (db.IsInActiveHours(job.ActiveHours, tzName) && db.IsOnActiveDay(job.ActiveDays, tzName)) {
 				dueCount++
 			}
 		}
@@ -260,9 +293,9 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 
 	if len(scheduled) > 0 {
 		fmt.Printf("\nScheduled Jobs\n")
-		fmt.Printf("%-30s  %8s  %10s  %-19s  %15s  %-19s  %4s  %5s  %5s\n",
+		fmt.Printf("%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5s  %5s\n",
 			"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails")
-		fmt.Println(strings.Repeat("-", 145))
+		fmt.Println(strings.Repeat("-", 149))
 
 		for _, r := range scheduled {
 			job := jobs[r.name]
@@ -284,14 +317,13 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 			if !job.Paused && r.nextRun.Valid && r.nextRun.String <= now.Format(time.RFC3339) {
 				isDue = "YES"
 			}
-			active := "always"
-			if job.ActiveHours != nil {
-				active = fmt.Sprintf("%02d-%02d", job.ActiveHours[0], job.ActiveHours[1])
-				if r.forceNext == 0 && !db.IsInActiveHours(job.ActiveHours, tzName) {
+			active := formatActive(job.ActiveDays, job.ActiveHours)
+			if r.forceNext == 0 {
+				if !db.IsInActiveHours(job.ActiveHours, tzName) || !db.IsOnActiveDay(job.ActiveDays, tzName) {
 					isDue = ""
 				}
 			}
-			fmt.Printf("%-30s  %8s  %10s  %-19s  %15s  %-19s  %4s  %5d  %5d\n",
+			fmt.Printf("%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5d  %5d\n",
 				r.name, interval, active, lr, st, nr, isDue, r.runCount, r.failCount)
 		}
 	}

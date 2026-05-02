@@ -109,6 +109,7 @@ jobs:
     interval: 5m
     description: Ping the app endpoint
     active_hours: [6, 22]
+    days: weekdays
     retries: 3
     retry_delay: 10s
     timeout: 30s
@@ -119,7 +120,7 @@ jobs:
     description: Restore a backup (run manually)
 ```
 
-This config sets up a daily backup pipeline: `db-backup` runs once a day, `upload-backup` waits for it to finish, `cleanup-old` runs weekly, and `health-check` pings every 5 minutes (only between 6am-10pm). The `restore` job is adhoc -- it only runs when you trigger it manually:
+This config sets up a daily backup pipeline: `db-backup` runs once a day, `upload-backup` waits for it to finish, `cleanup-old` runs weekly, and `health-check` pings every 5 minutes (only on weekdays, between 6am-10pm). The `restore` job is adhoc -- it only runs when you trigger it manually:
 
 ```bash
 dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
@@ -133,6 +134,7 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `interval` | yes* | | Run frequency: `30s`, `5m`, `2h`, `1d`, `1w` |
 | `description` | no | | Shown in logs and notifications |
 | `active_hours` | no | | `[start, end]` hours when the job is allowed to run |
+| `days` | no | | Days of week: `weekdays`, `weekends`, `all`, or list like `[mon, wed, fri]` |
 | `depends_on` | no | | Name of another job that must succeed first |
 | `retries` | no | `2` | Number of retry attempts on failure |
 | `retry_delay` | no | `5s` | Delay between retries |
