@@ -884,8 +884,9 @@ func validateJob(name string, job *config.JobConfig, allJobs map[string]*config.
 		}
 	}
 	if job.ActiveHours != nil {
-		if job.ActiveHours[0] < 0 || job.ActiveHours[0] > 23 || job.ActiveHours[1] < 0 || job.ActiveHours[1] > 23 {
-			issues = append(issues, fmt.Sprintf("%s: active_hours values must be 0-23", name))
+		start, end := job.ActiveHours[0], job.ActiveHours[1]
+		if start < 0 || start > 23 || end < 0 || end > 24 || start == end {
+			issues = append(issues, fmt.Sprintf("%s: active_hours must be 0-23 start with end strictly greater, or wrapping (e.g. [22, 2]); 24 means midnight", name))
 		}
 	}
 	return issues
