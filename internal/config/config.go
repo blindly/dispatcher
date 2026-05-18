@@ -201,6 +201,33 @@ func ExpandEnv(text string) string {
 	})
 }
 
+// ExtractNotifySettings does a lenient parse of the config file to extract only the
+// global notify block. It's used when Load() fails — we still want to notify about
+// config errors if notification channels are configured.
+func ExtractNotifySettings(path string) *NotifyConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	expanded := ExpandEnv(string(data))
+
+	// Lenient parse — just extract the notify block and ignore unknown keys.
+	var raw struct {
+		Notify NotifyConfig `yaml:"notify"`
+	}
+	if err := yaml.Unmarshal([]byte(expanded), &raw); err != nil {
+		return nil
+	}
+
+	// Check if any notification channel is configured
+	cfg := &raw.Notify
+	if cfg.Discord.Webhook == "" && cfg.Ntfy.URL == "" && cfg.Ntfy.Topic == "" {
+		return nil
+	}
+	return cfg
+}
+
 func Load(path string) (*DispatcherConfig, error) {
 	// Load .env from config directory before expanding variables
 	configDir := path
@@ -219,7 +246,9 @@ func Load(path string) (*DispatcherConfig, error) {
 	expanded := ExpandEnv(string(data))
 
 	var raw rawConfig
-	if err := yaml.Unmarshal([]byte(expanded), &raw); err != nil {
+	dec := yaml.NewDecoder(strings.NewReader(expanded))
+	dec.KnownFields(true)
+	if err := dec.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 

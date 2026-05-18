@@ -760,6 +760,141 @@ jobs:
 	}
 }
 
+func TestLoad_UnknownTopLevelKey(t *testing.T) {
+	yaml := `
+foo: bar
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for unknown top-level key 'foo'")
+	}
+}
+
+func TestLoad_UnknownNotifyKey(t *testing.T) {
+	yaml := `
+notify:
+  on: failure
+  failure: bad_key
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for unknown key inside notify block")
+	}
+}
+
+func TestLoad_UnknownJobKey(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+    commandx: typo
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for unknown key inside job")
+	}
+}
+
+func TestLoad_NotifyWithUnexpectedValue(t *testing.T) {
+	// This simulates "notify: true: failure" — YAML parses this as:
+	// notify:
+	//   true: failure
+	// With strict mode, the unknown key "true" inside notify is rejected.
+	yaml := `
+notify:
+  true: failure
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for invalid key in notify block")
+	}
+}
+
+func TestExtractNotifySettings_Success(t *testing.T) {
+	yaml := `
+notify:
+  on: failure
+  discord:
+    webhook: https://discord.com/hook
+  ntfy:
+    url: https://ntfy.sh
+    topic: my-dispatch
+
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg := ExtractNotifySettings(path)
+	if cfg == nil {
+		t.Fatal("expected non-nil notify config")
+	}
+	if cfg.Discord.Webhook != "https://discord.com/hook" {
+		t.Errorf("webhook = %q", cfg.Discord.Webhook)
+	}
+}
+
+func TestExtractNotifySettings_NoNotifyBlock(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg := ExtractNotifySettings(path)
+	if cfg != nil {
+		t.Error("expected nil — no notify channels configured")
+	}
+}
+
+func TestExtractNotifySettings_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(`: bad yaml`), 0644)
+
+	cfg := ExtractNotifySettings(path)
+	if cfg != nil {
+		t.Error("expected nil for invalid YAML")
+	}
+}
+
 func TestLoad_PauseTimeoutCustom(t *testing.T) {
 	yaml := `
 pause_timeout: 2h

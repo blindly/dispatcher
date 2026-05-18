@@ -271,6 +271,19 @@ func main() {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		if notifyCfg := config.ExtractNotifySettings(configPath); notifyCfg != nil {
+			notify.SendLiveNotification(
+				fmt.Sprintf("Config error in `%s`: %v", configPath, err),
+				"",
+				notify.NotifyConfig{
+					DiscordWebhook: notifyCfg.Discord.Webhook,
+					NtfyURL:        notifyCfg.Ntfy.URL,
+					NtfyTopic:      notifyCfg.Ntfy.Topic,
+					NtfyToken:      notifyCfg.Ntfy.Token,
+					NtfyPriority:   notifyCfg.Ntfy.Priority,
+				},
+			)
+		}
 		os.Exit(1)
 	}
 
