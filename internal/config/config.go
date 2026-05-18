@@ -86,6 +86,7 @@ type rawJob struct {
 	Adhoc       bool              `yaml:"adhoc"`
 	Dir         string            `yaml:"dir"`
 	Env         map[string]string `yaml:"env"`
+	Params      string            `yaml:"params"` // accepted but unused (user annotation)
 	Shell       string            `yaml:"shell"`
 	Notify      string            `yaml:"notify"`
 	Paused      bool              `yaml:"paused"`
@@ -98,6 +99,7 @@ type rawConfig struct {
 	Schedule       string            `yaml:"schedule"`
 	Retention      string            `yaml:"retention"`
 	PauseTimeout   string            `yaml:"pause_timeout"`
+	DBPath         string            `yaml:"db_path"` // accepted but unused (removed, default is .dispatcher/data.db)
 	DiscordWebhook string            `yaml:"discord_webhook"`
 	Vars           map[string]string `yaml:"vars"`
 }
