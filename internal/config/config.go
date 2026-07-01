@@ -17,7 +17,7 @@ type JobConfig struct {
 	Description     string            `yaml:"description"`
 	ActiveHours     *[2]int           `yaml:"-"`
 	ActiveDays      *[7]bool          `yaml:"-"` // indexed by time.Weekday: Sun=0..Sat=6; nil = every day
-	AtMinutes       *[]int            `yaml:"-"`  // nil = no alignment; one or more target minutes (0-59)
+	AtMinute        *int              `yaml:"-"`  // nil = no alignment; anchor minute (0-59), valid minutes derived from interval
 	DependsOn       string            `yaml:"depends_on"`
 	Retries         int               `yaml:"retries"`
 	RetryDelay      int               `yaml:"-"` // seconds, parsed from retry_delay
@@ -73,33 +73,13 @@ func (s *stringOrList) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// intOrList handles YAML values that can be either a single int or a list of ints.
-type intOrList []int
-
-func (l *intOrList) UnmarshalYAML(value *yaml.Node) error {
-	if value.Kind == yaml.ScalarNode {
-		var v int
-		if err := value.Decode(&v); err != nil {
-			return err
-		}
-		*l = []int{v}
-		return nil
-	}
-	var list []int
-	if err := value.Decode(&list); err != nil {
-		return err
-	}
-	*l = list
-	return nil
-}
-
 // rawJob is the intermediate YAML structure before parsing.
 type rawJob struct {
 	Command     stringOrList      `yaml:"command"`
 	Interval    string            `yaml:"interval"`
 	Description string            `yaml:"description"`
 	ActiveHours []int             `yaml:"active_hours"`
-	AtMinute    *intOrList        `yaml:"at_minute"`
+	AtMinute    *int              `yaml:"at_minute"`
 	Days        stringOrList      `yaml:"days"`
 	DependsOn   string            `yaml:"depends_on"`
 	Retries     *int              `yaml:"retries"`
@@ -384,15 +364,12 @@ func Load(path string) (*DispatcherConfig, error) {
 			job.ActiveHours = &[2]int{rj.ActiveHours[0], rj.ActiveHours[1]}
 		}
 
-		if rj.AtMinute != nil && len(*rj.AtMinute) > 0 {
-			minutes := make([]int, len(*rj.AtMinute))
-			for i, m := range *rj.AtMinute {
-				if m < 0 || m > 59 {
-					return nil, fmt.Errorf("job %q: at_minute must be between 0 and 59", name)
-				}
-				minutes[i] = m
+		if rj.AtMinute != nil {
+			minute := *rj.AtMinute
+			if minute < 0 || minute > 59 {
+				return nil, fmt.Errorf("job %q: at_minute must be between 0 and 59", name)
 			}
-			job.AtMinutes = &minutes
+			job.AtMinute = &minute
 		}
 
 		activeDays, err := parseDays(rj.Days)

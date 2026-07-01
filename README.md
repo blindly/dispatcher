@@ -161,14 +161,24 @@ jobs:
     at_minute: 0           # runs at 9:00, 10:00, 11:00 — no drift
 ```
 
-`at_minute` accepts a single value or a list. With a list, the next run picks whichever target minute in the current hour comes next — if none are left, it wraps to the earliest minute in the next hour. This is how you get jobs on a 15-minute schedule:
+For sub-hour intervals, `at_minute` is the anchor — valid minutes are derived from the interval automatically. With `interval: 15m` and `at_minute: 0`, the scheduler derives `[0, 15, 30, 45]` and picks whichever one comes next:
 
 ```yaml
 jobs:
   metrics:
     command: python3 scripts/metrics.py
     interval: 15m
-    at_minute: [0, 15, 30, 45]   # runs at 9:00, 9:15, 9:30, 9:45
+    at_minute: 0           # runs at 9:00, 9:15, 9:30, 9:45
+```
+
+An offset shifts the whole pattern:
+
+```yaml
+jobs:
+  heartbeat:
+    command: curl -sf https://myapp.com/ping
+    interval: 10m
+    at_minute: 5           # runs at 9:05, 9:15, 9:25, 9:35, 9:45, 9:55
 ```
 
 For multi-hour intervals, extra hours are added on top so the minimum spacing is still respected:

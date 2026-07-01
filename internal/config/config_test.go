@@ -933,39 +933,11 @@ jobs:
 		t.Fatal(err)
 	}
 	job := cfg.Jobs["j1"]
-	if job.AtMinutes == nil || len(*job.AtMinutes) != 1 {
-		t.Fatal("AtMinutes = nil, want [30]")
+	if job.AtMinute == nil {
+		t.Fatal("AtMinute = nil, want 30")
 	}
-	if (*job.AtMinutes)[0] != 30 {
-		t.Errorf("AtMinutes = %v, want [30]", *job.AtMinutes)
-	}
-}
-
-func TestLoad_AtMinuteList(t *testing.T) {
-	yaml := `
-jobs:
-  j1:
-    command: echo hi
-    interval: 15m
-    at_minute: [0, 15, 30, 45]
-`
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dispatcher.yaml")
-	os.WriteFile(path, []byte(yaml), 0644)
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	job := cfg.Jobs["j1"]
-	if job.AtMinutes == nil || len(*job.AtMinutes) != 4 {
-		t.Fatalf("AtMinutes = %v, want [0 15 30 45]", job.AtMinutes)
-	}
-	want := []int{0, 15, 30, 45}
-	for i := range want {
-		if (*job.AtMinutes)[i] != want[i] {
-			t.Errorf("AtMinutes[%d] = %d, want %d", i, (*job.AtMinutes)[i], want[i])
-		}
+	if *job.AtMinute != 30 {
+		t.Errorf("AtMinute = %d, want 30", *job.AtMinute)
 	}
 }
 
@@ -986,11 +958,11 @@ jobs:
 		t.Fatal(err)
 	}
 	job := cfg.Jobs["j1"]
-	if job.AtMinutes == nil || len(*job.AtMinutes) != 1 {
-		t.Fatal("AtMinutes = nil, want [0]")
+	if job.AtMinute == nil {
+		t.Fatal("AtMinute = nil, want 0")
 	}
-	if (*job.AtMinutes)[0] != 0 {
-		t.Errorf("AtMinutes = %v, want [0]", *job.AtMinutes)
+	if *job.AtMinute != 0 {
+		t.Errorf("AtMinute = %d, want 0", *job.AtMinute)
 	}
 }
 
@@ -1009,8 +981,8 @@ jobs:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Jobs["j1"].AtMinutes != nil {
-		t.Errorf("AtMinutes = %v, want nil when omitted", cfg.Jobs["j1"].AtMinutes)
+	if cfg.Jobs["j1"].AtMinute != nil {
+		t.Errorf("AtMinute = %v, want nil when omitted", cfg.Jobs["j1"].AtMinute)
 	}
 }
 
@@ -1050,20 +1022,28 @@ jobs:
 	}
 }
 
-func TestLoad_AtMinuteListInvalid(t *testing.T) {
+func TestLoad_AtMinuteFifteenMinuteInterval(t *testing.T) {
 	yaml := `
 jobs:
-  bad:
+  j1:
     command: echo hi
-    interval: 1h
-    at_minute: [0, 15, 60]
+    interval: 15m
+    at_minute: 0
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dispatcher.yaml")
 	os.WriteFile(path, []byte(yaml), 0644)
 
-	_, err := Load(path)
-	if err == nil {
-		t.Error("expected error for at_minute containing 60")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
 	}
+	job := cfg.Jobs["j1"]
+	if job.AtMinute == nil {
+		t.Fatal("AtMinute = nil, want 0")
+	}
+	if *job.AtMinute != 0 {
+		t.Errorf("AtMinute = %d, want 0", *job.AtMinute)
+	}
+	// Note: the scheduler will derive [0, 15, 30, 45] from interval + at_minute at runtime.
 }

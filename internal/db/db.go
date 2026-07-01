@@ -147,20 +147,26 @@ func IsOnActiveDay(days *[7]bool, tzName string) bool {
 	return days[int(time.Now().In(loc).Weekday())]
 }
 
-// computeNextAligned computes the next run time. When atMinutes is nil it simply
-// adds the interval to now. When atMinutes is set it snaps to the next clock time
-// whose minute matches one of the target values that is after now — this prevents
-// schedule drift. For intervals larger than 1 hour, extra hours are added on top
-// of the first aligned minute so the interval is still respected.
-func computeNextAligned(now time.Time, intervalSec int, atMinutes *[]int) time.Time {
-	if atMinutes == nil || len(*atMinutes) == 0 {
+// computeNextAligned computes the next run time. When atMinute is nil it simply
+// adds the interval to now. When atMinute is set it derives valid minutes from
+// the interval, then snaps to the earliest valid minute after now — this prevents
+// schedule drift. For multi-hour intervals (>=60m), it acts as a single anchor.
+func computeNextAligned(now time.Time, intervalSec int, atMinute *int) time.Time {
+	if atMinute == nil || intervalSec <= 0 {
 		return now.Add(time.Duration(intervalSec) * time.Second)
 	}
 
-	minutes := *atMinutes
-	// Find the earliest target minute strictly after now within the current hour.
+	// Derive the set of valid minutes from the interval.
+	intervalMin := intervalSec / 60
+	validMinutes := deriveValidMinutes(*atMinute, intervalMin)
+	if validMinutes == nil {
+		// Sub-minute interval — no alignment applies, fall back to plain addition.
+		return now.Add(time.Duration(intervalSec) * time.Second)
+	}
+
+	// Find the earliest valid minute strictly after now within the current hour.
 	var best time.Time
-	for _, m := range minutes {
+	for _, m := range validMinutes {
 		c := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), m, 0, 0, now.Location())
 		if !c.After(now) {
 			continue
@@ -170,10 +176,10 @@ func computeNextAligned(now time.Time, intervalSec int, atMinutes *[]int) time.T
 		}
 	}
 	if best.IsZero() {
-		// No target minute left in the current hour; pick the earliest in the next hour.
+		// No valid minute left in the current hour; pick the earliest in the next hour.
 		nextHour := now.Add(time.Hour).Truncate(time.Minute)
 		earliest := 60
-		for _, m := range minutes {
+		for _, m := range validMinutes {
 			if m < earliest {
 				earliest = m
 			}
@@ -181,14 +187,40 @@ func computeNextAligned(now time.Time, intervalSec int, atMinutes *[]int) time.T
 		best = time.Date(nextHour.Year(), nextHour.Month(), nextHour.Day(), nextHour.Hour(), earliest, 0, 0, nextHour.Location())
 	}
 
-	// For intervals larger than 1 hour, add extra hours beyond the first
-	// aligned minute so the minimum interval is still roughly respected.
+	// For multi-hour intervals, add extra hours beyond the first aligned minute
+	// so the minimum interval is still roughly respected.
 	intervalHours := intervalSec / 3600
 	if intervalHours > 1 {
 		best = best.Add(time.Duration(intervalHours-1) * time.Hour)
 	}
 
 	return best
+}
+
+// deriveValidMinutes returns the set of minute-of-hour values that fall on the
+// interval cadence. For sub-hour intervals (intervalMin > 0 && < 60) it cycles
+// through the hour (e.g. 15m with anchor 0 → [0, 15, 30, 45]). For multi-hour
+// intervals it returns just the anchor minute.
+func deriveValidMinutes(anchor int, intervalMin int) []int {
+	if intervalMin >= 60 {
+		return []int{anchor}
+	}
+	if intervalMin <= 0 {
+		return nil // sub-minute interval — no alignment
+	}
+	var out []int
+	m := anchor % 60
+	seen := make(map[int]bool)
+	for {
+		if !seen[m] {
+			out = append(out, m)
+			seen[m] = true
+		} else {
+			break
+		}
+		m = (m + intervalMin) % 60
+	}
+	return out
 }
 
 func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {
@@ -219,9 +251,9 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 	return due
 }
 
-func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string, atMinutes *[]int) {
+func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string, atMinute *int) {
 	now := NowUTC()
-	nextRun := computeNextAligned(now, intervalSeconds, atMinutes).Format(time.RFC3339)
+	nextRun := computeNextAligned(now, intervalSeconds, atMinute).Format(time.RFC3339)
 	failInc := 0
 	if rc != 0 && status != "interrupted" {
 		failInc = 1

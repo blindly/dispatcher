@@ -452,10 +452,10 @@ func TestComputeNextAligned_NilAtMinute(t *testing.T) {
 }
 
 func TestComputeNextAligned_SnapsToMinute(t *testing.T) {
-	// Job finishes at 10:05:00 with interval 1h and at_minute=[0]
+	// Job finishes at 10:05:00 with interval 1h and at_minute=0
 	now := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
-	atMins := []int{0}
-	next := computeNextAligned(now, 3600, &atMins)
+	atMin := 0
+	next := computeNextAligned(now, 3600, &atMin)
 	// Should snap to 11:00:00
 	want := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
 	if !next.Equal(want) {
@@ -464,11 +464,11 @@ func TestComputeNextAligned_SnapsToMinute(t *testing.T) {
 }
 
 func TestComputeNextAligned_CurrentMinuteAlreadyMatches(t *testing.T) {
-	// Job finishes at 10:30:00 with interval 1h and at_minute=[30]
+	// Job finishes at 10:30:00 with interval 1h and at_minute=30
 	// Candidate 10:30:00 is not after now (equal), so move to 11:30
 	now := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
-	atMins := []int{30}
-	next := computeNextAligned(now, 3600, &atMins)
+	atMin := 30
+	next := computeNextAligned(now, 3600, &atMin)
 	want := time.Date(2026, 1, 1, 11, 30, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("got %s, want %s", next, want)
@@ -476,11 +476,11 @@ func TestComputeNextAligned_CurrentMinuteAlreadyMatches(t *testing.T) {
 }
 
 func TestComputeNextAligned_JobRunsInSameMinute(t *testing.T) {
-	// Job finishes at 10:00:01, at_minute=[0], interval=1h
+	// Job finishes at 10:00:01, at_minute=0, interval=1h
 	// Candidate 10:00:00 is in the past, next candidate 11:00:00
 	now := time.Date(2026, 1, 1, 10, 0, 1, 0, time.UTC)
-	atMins := []int{0}
-	next := computeNextAligned(now, 3600, &atMins)
+	atMin := 0
+	next := computeNextAligned(now, 3600, &atMin)
 	want := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("got %s, want %s", next, want)
@@ -488,72 +488,130 @@ func TestComputeNextAligned_JobRunsInSameMinute(t *testing.T) {
 }
 
 func TestComputeNextAligned_FutureCandidateInSameHour(t *testing.T) {
-	// Job finishes at 10:10, at_minute=[30], interval=5m
-	// Candidate 10:30:00 is 20m away
+	// Job finishes at 10:10, at_minute=30, interval=5m
+	// 5m interval derives valid minutes: [30, 35, 40, 45, 50, 55, 5, 10, 15, 20, 25]
+	// First one after 10:10 in current hour is 10:15
 	now := time.Date(2026, 1, 1, 10, 10, 0, 0, time.UTC)
-	atMins := []int{30}
-	next := computeNextAligned(now, 300, &atMins)
-	want := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
-	if !next.Equal(want) {
-		t.Errorf("got %s, want %s", next, want)
-	}
-}
-
-func TestComputeNextAligned_MultiHourInterval(t *testing.T) {
-	// Job finishes at 10:05, at_minute=[0], interval=2h
-	// Candidate 11:00:00, + 1 extra hour = 12:00:00
-	now := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
-	atMins := []int{0}
-	next := computeNextAligned(now, 7200, &atMins)
-	want := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	if !next.Equal(want) {
-		t.Errorf("got %s, want %s", next, want)
-	}
-}
-
-func TestComputeNextAligned_ListPicksNextInHour(t *testing.T) {
-	// Job finishes at 10:20, at_minute=[0,15,30,45], interval=15m
-	// Next available in current hour is 30 (0,15 are past)
-	now := time.Date(2026, 1, 1, 10, 20, 0, 0, time.UTC)
-	atMins := []int{0, 15, 30, 45}
-	next := computeNextAligned(now, 900, &atMins)
-	want := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
-	if !next.Equal(want) {
-		t.Errorf("got %s, want %s", next, want)
-	}
-}
-
-func TestComputeNextAligned_ListWrapsToNextHour(t *testing.T) {
-	// Job finishes at 10:50, at_minute=[0,15,30,45], interval=15m
-	// No target minute left in current hour, earliest in next = 11:00
-	now := time.Date(2026, 1, 1, 10, 50, 0, 0, time.UTC)
-	atMins := []int{0, 15, 30, 45}
-	next := computeNextAligned(now, 900, &atMins)
-	want := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
-	if !next.Equal(want) {
-		t.Errorf("got %s, want %s", next, want)
-	}
-}
-
-func TestComputeNextAligned_ListPicksClosest(t *testing.T) {
-	// Job finishes at 10:02, at_minute=[0,15,30,45], interval=15m
-	// Next target in current hour is 15 (0 is past)
-	now := time.Date(2026, 1, 1, 10, 2, 0, 0, time.UTC)
-	atMins := []int{0, 15, 30, 45}
-	next := computeNextAligned(now, 900, &atMins)
+	atMin := 30
+	next := computeNextAligned(now, 300, &atMin)
 	want := time.Date(2026, 1, 1, 10, 15, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("got %s, want %s", next, want)
 	}
 }
 
-func TestComputeNextAligned_EmptyListIsNoOp(t *testing.T) {
+func TestComputeNextAligned_MultiHourInterval(t *testing.T) {
+	// Job finishes at 10:05, at_minute=0, interval=2h
+	// Candidate 11:00:00, + 1 extra hour = 12:00:00
 	now := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
-	atMins := []int{}
-	next := computeNextAligned(now, 3600, &atMins)
+	atMin := 0
+	next := computeNextAligned(now, 7200, &atMin)
+	want := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_FifteenMinuteIntervalPicksNext(t *testing.T) {
+	// interval=15m, at_minute=0 → derived: [0, 15, 30, 45]
+	// Job finishes at 10:20, next in current hour is 30
+	now := time.Date(2026, 1, 1, 10, 20, 0, 0, time.UTC)
+	atMin := 0
+	next := computeNextAligned(now, 900, &atMin)
+	want := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_FifteenMinuteIntervalWrapsToNextHour(t *testing.T) {
+	// interval=15m, at_minute=0 → derived: [0, 15, 30, 45]
+	// Job finishes at 10:50, no target left in current hour, earliest next = 11:00
+	now := time.Date(2026, 1, 1, 10, 50, 0, 0, time.UTC)
+	atMin := 0
+	next := computeNextAligned(now, 900, &atMin)
+	want := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_TenMinuteIntervalWithAnchor5(t *testing.T) {
+	// interval=10m, at_minute=5 → derived: [5, 15, 25, 35, 45, 55]
+	// Job finishes at 10:20, next in current hour is 25
+	now := time.Date(2026, 1, 1, 10, 20, 0, 0, time.UTC)
+	atMin := 5
+	next := computeNextAligned(now, 600, &atMin)
+	want := time.Date(2026, 1, 1, 10, 25, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_TenMinuteIntervalWrapWithAnchor5(t *testing.T) {
+	// interval=10m, at_minute=5 → derived: [5, 15, 25, 35, 45, 55]
+	// Job finishes at 10:56, no target left, earliest next hour = 11:05
+	now := time.Date(2026, 1, 1, 10, 56, 0, 0, time.UTC)
+	atMin := 5
+	next := computeNextAligned(now, 600, &atMin)
 	want := time.Date(2026, 1, 1, 11, 5, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_FifteenMinuteIntervalPicksClosest(t *testing.T) {
+	// interval=15m, at_minute=0 → derived: [0, 15, 30, 45]
+	// Job finishes at 10:02, next target is 15
+	now := time.Date(2026, 1, 1, 10, 2, 0, 0, time.UTC)
+	atMin := 0
+	next := computeNextAligned(now, 900, &atMin)
+	want := time.Date(2026, 1, 1, 10, 15, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_SubMinuteIntervalNoAlignment(t *testing.T) {
+	// interval=30s → intervalMin=0, no alignment applied
+	now := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+	atMin := 0
+	next := computeNextAligned(now, 30, &atMin)
+	want := time.Date(2026, 1, 1, 10, 5, 30, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestDeriveValidMinutes(t *testing.T) {
+	// 15m from anchor 0
+	got := deriveValidMinutes(0, 15)
+	if len(got) != 4 || got[0] != 0 || got[1] != 15 || got[2] != 30 || got[3] != 45 {
+		t.Errorf("got %v, want [0 15 30 45]", got)
+	}
+
+	// 10m from anchor 5
+	got = deriveValidMinutes(5, 10)
+	if len(got) != 6 || got[0] != 5 || got[1] != 15 || got[2] != 25 {
+		t.Errorf("got %v, want [5 15 25 35 45 55]", got)
+	}
+
+	// 20m from anchor 10
+	got = deriveValidMinutes(10, 20)
+	if len(got) != 3 || got[0] != 10 || got[1] != 30 || got[2] != 50 {
+		t.Errorf("got %v, want [10 30 50]", got)
+	}
+
+	// multi-hour (intervalMin >= 60) → just anchor
+	got = deriveValidMinutes(30, 60)
+	if len(got) != 1 || got[0] != 30 {
+		t.Errorf("got %v, want [30]", got)
+	}
+
+	// sub-minute (intervalMin == 0) → nil
+	got = deriveValidMinutes(0, 0)
+	if got != nil {
+		t.Errorf("got %v, want nil", got)
 	}
 }
 
@@ -568,8 +626,8 @@ func TestUpdateAfterRun_AtMinuteAligns(t *testing.T) {
 	now := NowUTC().Format(time.RFC3339)
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "aligned", now)
 
-	atMins := []int{30}
-	UpdateAfterRun(conn, "aligned", 3600, 0, 1.5, "ok", &atMins)
+	atMin := 30
+	UpdateAfterRun(conn, "aligned", 3600, 0, 1.5, "ok", &atMin)
 
 	var nextRunStr string
 	conn.QueryRow("SELECT next_run_at FROM cron_jobs WHERE name = ?", "aligned").Scan(&nextRunStr)
