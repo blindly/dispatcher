@@ -915,3 +915,109 @@ jobs:
 		t.Errorf("pause_timeout = %d, want 7200", cfg.PauseTimeout)
 	}
 }
+
+func TestLoad_AtMinute(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+    at_minute: 30
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["j1"]
+	if job.AtMinute == nil {
+		t.Fatal("AtMinute = nil, want 30")
+	}
+	if *job.AtMinute != 30 {
+		t.Errorf("AtMinute = %d, want 30", *job.AtMinute)
+	}
+}
+
+func TestLoad_AtMinuteZero(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+    at_minute: 0
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["j1"]
+	if job.AtMinute == nil {
+		t.Fatal("AtMinute = nil, want 0")
+	}
+	if *job.AtMinute != 0 {
+		t.Errorf("AtMinute = %d, want 0", *job.AtMinute)
+	}
+}
+
+func TestLoad_AtMinuteOmittedIsNil(t *testing.T) {
+	yaml := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Jobs["j1"].AtMinute != nil {
+		t.Errorf("AtMinute = %v, want nil when omitted", cfg.Jobs["j1"].AtMinute)
+	}
+}
+
+func TestLoad_AtMinuteTooHigh(t *testing.T) {
+	yaml := `
+jobs:
+  bad:
+    command: echo hi
+    interval: 1h
+    at_minute: 60
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for at_minute=60")
+	}
+}
+
+func TestLoad_AtMinuteNegative(t *testing.T) {
+	yaml := `
+jobs:
+  bad:
+    command: echo hi
+    interval: 1h
+    at_minute: -1
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for at_minute=-1")
+	}
+}

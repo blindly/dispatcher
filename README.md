@@ -134,6 +134,7 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `interval` | yes* | | Run frequency: `30s`, `5m`, `2h`, `1d`, `1w` |
 | `description` | no | | Shown in logs and notifications |
 | `active_hours` | no | | `[start, end]` hours when the job is allowed to run |
+| `at_minute` | no | | Minute (0–59) to run at; prevents schedule drift from execution time |
 | `days` | no | | Days of week: `weekdays`, `weekends`, `all`, or list like `[mon, wed, fri]` |
 | `depends_on` | no | | Name of another job that must succeed first |
 | `retries` | no | `2` | Number of retry attempts on failure |
@@ -143,10 +144,32 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `dir` | no | | Working directory for the command |
 | `env` | no | | Environment variables (key-value map) |
 | `shell` | no | | Shell to use (e.g. `/bin/bash`, `powershell`) |
-| `notify` | no | | Set to `output` to forward job stdout as notification |
+| `notify` | no | | Set to `output` to forward job stdout as the notification body |
 | `paused` | no | | Set to `true` to temporarily disable scheduling |
 
 \* `interval` is not required when `adhoc: true`.
+
+### Preventing schedule drift with `at_minute`
+
+Without `at_minute`, a job that takes 3 minutes to run on a 1-hour interval will progressively drift later each cycle: 9:00, 10:03, 11:06, 12:09, etc. Setting `at_minute` snaps the next run to a specific clock minute:
+
+```yaml
+jobs:
+  db-backup:
+    command: pg_dump myapp > backup.sql
+    interval: 1h
+    at_minute: 0           # runs at 9:00, 10:00, 11:00 — no drift
+```
+
+The next run is always the next occurrence of the target minute that is at least as far away as the interval. For multi-hour intervals, extra hours are added on top so the minimum spacing is still respected:
+
+```yaml
+jobs:
+  daily-report:
+    command: python3 scripts/report.py
+    interval: 24h
+    at_minute: 30          # runs at 00:30 each day, regardless of runtime
+```
 
 Environment variables in the form `${VAR_NAME}` are expanded throughout the config. Variables are loaded from `.dispatcher/.env` first, then from a `.env` in the config directory (project root), then from the shell environment. Use this for secrets like webhook URLs:
 

@@ -17,6 +17,7 @@ type JobConfig struct {
 	Description     string            `yaml:"description"`
 	ActiveHours     *[2]int           `yaml:"-"`
 	ActiveDays      *[7]bool          `yaml:"-"` // indexed by time.Weekday: Sun=0..Sat=6; nil = every day
+	AtMinute        *int              `yaml:"at_minute"`
 	DependsOn       string            `yaml:"depends_on"`
 	Retries         int               `yaml:"retries"`
 	RetryDelay      int               `yaml:"-"` // seconds, parsed from retry_delay
@@ -78,6 +79,7 @@ type rawJob struct {
 	Interval    string            `yaml:"interval"`
 	Description string            `yaml:"description"`
 	ActiveHours []int             `yaml:"active_hours"`
+	AtMinute    *int              `yaml:"at_minute"`
 	Days        stringOrList      `yaml:"days"`
 	DependsOn   string            `yaml:"depends_on"`
 	Retries     *int              `yaml:"retries"`
@@ -360,6 +362,14 @@ func Load(path string) (*DispatcherConfig, error) {
 
 		if len(rj.ActiveHours) == 2 {
 			job.ActiveHours = &[2]int{rj.ActiveHours[0], rj.ActiveHours[1]}
+		}
+
+		if rj.AtMinute != nil {
+			minute := *rj.AtMinute
+			if minute < 0 || minute > 59 {
+				return nil, fmt.Errorf("job %q: at_minute must be between 0 and 59", name)
+			}
+			job.AtMinute = &minute
 		}
 
 		activeDays, err := parseDays(rj.Days)

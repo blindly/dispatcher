@@ -218,7 +218,7 @@ func TestUpdateAfterRun(t *testing.T) {
 	now := NowUTC().Format(time.RFC3339)
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "test", now)
 
-	UpdateAfterRun(conn, "test", 300, 0, 1.5, "ok")
+	UpdateAfterRun(conn, "test", 300, 0, 1.5, "ok", nil)
 
 	var runCount int
 	var status string
@@ -251,7 +251,7 @@ func TestUpdateAfterRun_InterruptedDoesNotBumpFailCount(t *testing.T) {
 
 	// Simulate a Ctrl+C: rc=130 (SIGINT) but status="interrupted".
 	// run_count should bump, fail_count should NOT.
-	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "interrupted")
+	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "interrupted", nil)
 
 	var runCount, failCount int
 	var status string
@@ -268,7 +268,7 @@ func TestUpdateAfterRun_InterruptedDoesNotBumpFailCount(t *testing.T) {
 	}
 
 	// Sanity check: a regular failure with the same rc still bumps fail_count.
-	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "failed:130")
+	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "failed:130", nil)
 	conn.QueryRow("SELECT fail_count FROM cron_jobs WHERE name = ?", "interrupt_test").Scan(&failCount)
 	if failCount != 1 {
 		t.Errorf("fail_count after non-interrupted failure = %d, want 1", failCount)
@@ -287,9 +287,9 @@ func TestGetAnalytics(t *testing.T) {
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "analytics_test", now)
 
 	// Simulate 3 runs: 2 pass, 1 fail
-	UpdateAfterRun(conn, "analytics_test", 300, 0, 1.0, "ok")
-	UpdateAfterRun(conn, "analytics_test", 300, 0, 2.0, "ok")
-	UpdateAfterRun(conn, "analytics_test", 300, 1, 3.0, "failed:1")
+	UpdateAfterRun(conn, "analytics_test", 300, 0, 1.0, "ok", nil)
+	UpdateAfterRun(conn, "analytics_test", 300, 0, 2.0, "ok", nil)
+	UpdateAfterRun(conn, "analytics_test", 300, 1, 3.0, "failed:1", nil)
 
 	results, err := GetAnalytics(conn)
 	if err != nil {
@@ -344,9 +344,9 @@ func TestGetHistory(t *testing.T) {
 	now := NowUTC().Format(time.RFC3339)
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "hist_test", now)
 
-	UpdateAfterRun(conn, "hist_test", 300, 0, 1.0, "ok")
-	UpdateAfterRun(conn, "hist_test", 300, 1, 2.0, "failed:1")
-	UpdateAfterRun(conn, "hist_test", 300, 0, 1.5, "ok")
+	UpdateAfterRun(conn, "hist_test", 300, 0, 1.0, "ok", nil)
+	UpdateAfterRun(conn, "hist_test", 300, 1, 2.0, "failed:1", nil)
+	UpdateAfterRun(conn, "hist_test", 300, 0, 1.5, "ok", nil)
 
 	entries, err := GetHistory(conn, "hist_test", 10)
 	if err != nil {
@@ -424,7 +424,7 @@ func TestPurgeHistory(t *testing.T) {
 		"purge_test", old, "ok", 0, 1.0)
 
 	// Insert a recent run
-	UpdateAfterRun(conn, "purge_test", 300, 0, 1.0, "ok")
+	UpdateAfterRun(conn, "purge_test", 300, 0, 1.0, "ok", nil)
 
 	// Purge older than 90 days
 	deleted, err := PurgeHistory(conn, 90)
@@ -439,5 +439,96 @@ func TestPurgeHistory(t *testing.T) {
 	entries, _ := GetHistory(conn, "purge_test", 10)
 	if len(entries) != 1 {
 		t.Errorf("remaining = %d, want 1", len(entries))
+	}
+}
+
+func TestComputeNextAligned_NilAtMinute(t *testing.T) {
+	now := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+	next := computeNextAligned(now, 3600, nil)
+	want := time.Date(2026, 1, 1, 11, 5, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_SnapsToMinute(t *testing.T) {
+	// Job finishes at 10:05:00 with interval 1h and at_minute=0
+	now := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+	atMin := 0
+	next := computeNextAligned(now, 3600, &atMin)
+	// Should snap to 11:00:00 (next :00 that is >= 1h away)
+	want := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_CurrentMinuteAlreadyMatches(t *testing.T) {
+	// Job finishes at 10:30:00 with interval 1h and at_minute=30
+	// Candidate 10:30:00 is not after now (10:30:00 == 10:30:00), so move to 11:30
+	now := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
+	atMin := 30
+	next := computeNextAligned(now, 3600, &atMin)
+	want := time.Date(2026, 1, 1, 11, 30, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_JobRunsInSameMinute(t *testing.T) {
+	// Job finishes at 10:00:01, at_minute=0, interval=1h
+	// Candidate 10:00:00 is in the past, next candidate 11:00:00 is >= 1h away
+	now := time.Date(2026, 1, 1, 10, 0, 1, 0, time.UTC)
+	atMin := 0
+	next := computeNextAligned(now, 3600, &atMin)
+	want := time.Date(2026, 1, 1, 11, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_FutureCandidateInSameHour(t *testing.T) {
+	// Job finishes at 10:10, at_minute=30, interval=5m
+	// Candidate 10:30:00 is 20m away which is >= 5m interval
+	now := time.Date(2026, 1, 1, 10, 10, 0, 0, time.UTC)
+	atMin := 30
+	next := computeNextAligned(now, 300, &atMin)
+	want := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestComputeNextAligned_MultiHourInterval(t *testing.T) {
+	// Job finishes at 10:05, at_minute=0, interval=2h
+	// Candidate 11:00:00 is only 55m away (< 2h), so advance to 12:00:00
+	now := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+	atMin := 0
+	next := computeNextAligned(now, 7200, &atMin)
+	want := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(want) {
+		t.Errorf("got %s, want %s", next, want)
+	}
+}
+
+func TestUpdateAfterRun_AtMinuteAligns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	now := NowUTC().Format(time.RFC3339)
+	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "aligned", now)
+
+	atMin := 30
+	UpdateAfterRun(conn, "aligned", 3600, 0, 1.5, "ok", &atMin)
+
+	var nextRunStr string
+	conn.QueryRow("SELECT next_run_at FROM cron_jobs WHERE name = ?", "aligned").Scan(&nextRunStr)
+	nextRun, _ := time.Parse(time.RFC3339, nextRunStr)
+	if nextRun.Minute() != 30 {
+		t.Errorf("next_run minute = %d, want 30", nextRun.Minute())
 	}
 }

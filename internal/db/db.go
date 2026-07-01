@@ -147,6 +147,33 @@ func IsOnActiveDay(days *[7]bool, tzName string) bool {
 	return days[int(time.Now().In(loc).Weekday())]
 }
 
+// computeNextAligned computes the next run time. When atMinute is nil it simply
+// adds the interval to now. When atMinute is set it snaps to the next clock time
+// whose minute matches atMinute that is after now — this prevents schedule drift.
+// For intervals larger than 1 hour, extra hours are added on top of the first
+// aligned minute so the interval is still respected.
+func computeNextAligned(now time.Time, intervalSec int, atMinute *int) time.Time {
+	if atMinute == nil {
+		return now.Add(time.Duration(intervalSec) * time.Second)
+	}
+
+	// Find the first occurrence of the target minute after now.
+	candidate := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), *atMinute, 0, 0, now.Location())
+	if !candidate.After(now) {
+		candidate = candidate.Add(time.Hour)
+	}
+
+	// For intervals larger than 1 hour, add extra hours beyond the first
+	// aligned minute so the minimum interval is still roughly respected.
+	intervalHours := intervalSec / 3600
+	if intervalHours > 1 {
+		// candidate is already 1 hour ahead; add the remaining hours.
+		candidate = candidate.Add(time.Duration(intervalHours-1) * time.Hour)
+	}
+
+	return candidate
+}
+
 func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {
 	now := NowUTC().Format(time.RFC3339)
 	rows, err := db.Query("SELECT name, force_next FROM cron_jobs WHERE next_run_at <= ? ORDER BY next_run_at", now)
@@ -175,9 +202,9 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 	return due
 }
 
-func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string) {
+func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string, atMinute *int) {
 	now := NowUTC()
-	nextRun := now.Add(time.Duration(intervalSeconds) * time.Second).Format(time.RFC3339)
+	nextRun := computeNextAligned(now, intervalSeconds, atMinute).Format(time.RFC3339)
 	failInc := 0
 	if rc != 0 && status != "interrupted" {
 		failInc = 1

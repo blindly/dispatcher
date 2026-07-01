@@ -231,7 +231,7 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 		status = fmt.Sprintf("ok:retry%d", attempt-1)
 	}
 
-	db.UpdateAfterRun(conn, job.Name, job.IntervalSeconds, rc, elapsed, status)
+	db.UpdateAfterRun(conn, job.Name, job.IntervalSeconds, rc, elapsed, status, job.AtMinute)
 
 	icon := "OK"
 	if isInterrupted(rc) {
