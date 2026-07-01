@@ -147,31 +147,48 @@ func IsOnActiveDay(days *[7]bool, tzName string) bool {
 	return days[int(time.Now().In(loc).Weekday())]
 }
 
-// computeNextAligned computes the next run time. When atMinute is nil it simply
-// adds the interval to now. When atMinute is set it snaps to the next clock time
-// whose minute matches atMinute that is after now — this prevents schedule drift.
-// For intervals larger than 1 hour, extra hours are added on top of the first
-// aligned minute so the interval is still respected.
-func computeNextAligned(now time.Time, intervalSec int, atMinute *int) time.Time {
-	if atMinute == nil {
+// computeNextAligned computes the next run time. When atMinutes is nil it simply
+// adds the interval to now. When atMinutes is set it snaps to the next clock time
+// whose minute matches one of the target values that is after now — this prevents
+// schedule drift. For intervals larger than 1 hour, extra hours are added on top
+// of the first aligned minute so the interval is still respected.
+func computeNextAligned(now time.Time, intervalSec int, atMinutes *[]int) time.Time {
+	if atMinutes == nil || len(*atMinutes) == 0 {
 		return now.Add(time.Duration(intervalSec) * time.Second)
 	}
 
-	// Find the first occurrence of the target minute after now.
-	candidate := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), *atMinute, 0, 0, now.Location())
-	if !candidate.After(now) {
-		candidate = candidate.Add(time.Hour)
+	minutes := *atMinutes
+	// Find the earliest target minute strictly after now within the current hour.
+	var best time.Time
+	for _, m := range minutes {
+		c := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), m, 0, 0, now.Location())
+		if !c.After(now) {
+			continue
+		}
+		if best.IsZero() || c.Before(best) {
+			best = c
+		}
+	}
+	if best.IsZero() {
+		// No target minute left in the current hour; pick the earliest in the next hour.
+		nextHour := now.Add(time.Hour).Truncate(time.Minute)
+		earliest := 60
+		for _, m := range minutes {
+			if m < earliest {
+				earliest = m
+			}
+		}
+		best = time.Date(nextHour.Year(), nextHour.Month(), nextHour.Day(), nextHour.Hour(), earliest, 0, 0, nextHour.Location())
 	}
 
 	// For intervals larger than 1 hour, add extra hours beyond the first
 	// aligned minute so the minimum interval is still roughly respected.
 	intervalHours := intervalSec / 3600
 	if intervalHours > 1 {
-		// candidate is already 1 hour ahead; add the remaining hours.
-		candidate = candidate.Add(time.Duration(intervalHours-1) * time.Hour)
+		best = best.Add(time.Duration(intervalHours-1) * time.Hour)
 	}
 
-	return candidate
+	return best
 }
 
 func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {
@@ -202,9 +219,9 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 	return due
 }
 
-func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string, atMinute *int) {
+func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string, atMinutes *[]int) {
 	now := NowUTC()
-	nextRun := computeNextAligned(now, intervalSeconds, atMinute).Format(time.RFC3339)
+	nextRun := computeNextAligned(now, intervalSeconds, atMinutes).Format(time.RFC3339)
 	failInc := 0
 	if rc != 0 && status != "interrupted" {
 		failInc = 1

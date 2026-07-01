@@ -161,7 +161,17 @@ jobs:
     at_minute: 0           # runs at 9:00, 10:00, 11:00 — no drift
 ```
 
-The next run is always the next occurrence of the target minute that is at least as far away as the interval. For multi-hour intervals, extra hours are added on top so the minimum spacing is still respected:
+`at_minute` accepts a single value or a list. With a list, the next run picks whichever target minute in the current hour comes next — if none are left, it wraps to the earliest minute in the next hour. This is how you get jobs on a 15-minute schedule:
+
+```yaml
+jobs:
+  metrics:
+    command: python3 scripts/metrics.py
+    interval: 15m
+    at_minute: [0, 15, 30, 45]   # runs at 9:00, 9:15, 9:30, 9:45
+```
+
+For multi-hour intervals, extra hours are added on top so the minimum spacing is still respected:
 
 ```yaml
 jobs:

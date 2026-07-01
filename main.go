@@ -182,7 +182,8 @@ jobs:
     # adhoc: true
     # timeout: 5m
     # active_hours: [9, 17]
-    # at_minute: 0      # run on the minute (0-59), prevents schedule drift
+    # at_minute: 0           # run on the minute (0-59), prevents drift
+    # at_minute: [0, 15]     # or a list for sub-hour intervals
     # days: weekdays   # or weekends, all, or [mon, wed, fri]
     # depends_on: other_job
     # retries: 2
