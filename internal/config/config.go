@@ -25,7 +25,7 @@ type JobConfig struct {
 	Adhoc           bool
 	Dir             string            `yaml:"dir"`
 	Env             map[string]string `yaml:"env"`
-	Shell           string            `yaml:"shell"`
+	Shell           string            `yaml:"shell"` // default: /bin/bash (Unix) or powershell (Windows)
 	Notify          string            `yaml:"notify"` // "always", "failure", or "" (inherit global)
 	Paused          bool              `yaml:"paused"`
 }

@@ -63,20 +63,22 @@ func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []
 	}
 	defer cancel()
 
-	if job.Shell != "" {
-		fullCmd := command
-		if len(extraArgs) > 0 {
-			fullCmd += " " + strings.Join(extraArgs, " ")
-		}
-		cmd = exec.CommandContext(ctx, job.Shell, "-c", fullCmd)
-	} else {
-		parts := strings.Fields(command)
-		if len(parts) == 0 {
-			return -2, "empty command"
-		}
-		parts = append(parts, extraArgs...)
-		cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
+	shell := job.Shell
+	if shell == "" {
+		shell = DefaultShell()
 	}
+
+	// PowerShell uses -Command instead of -c
+	shellArg := "-c"
+	if strings.EqualFold(shell, "powershell") || strings.EqualFold(shell, "pwsh") {
+		shellArg = "-Command"
+	}
+
+	fullCmd := command
+	if len(extraArgs) > 0 {
+		fullCmd += " " + strings.Join(extraArgs, " ")
+	}
+	cmd = exec.CommandContext(ctx, shell, shellArg, fullCmd)
 
 	// Build environment: os env + job env + extra env
 	env := os.Environ()

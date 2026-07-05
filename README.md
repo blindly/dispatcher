@@ -143,7 +143,7 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `adhoc` | no | `false` | If true, only runs manually (skipped by scheduler) |
 | `dir` | no | | Working directory for the command |
 | `env` | no | | Environment variables (key-value map) |
-| `shell` | no | | Shell to use (e.g. `/bin/bash`, `powershell`) |
+| `shell` | no | `/bin/bash` (Unix), `powershell` (Windows) | Shell to use for running commands |
 | `notify` | no | | Set to `output` to forward job stdout as the notification body |
 | `paused` | no | | Set to `true` to temporarily disable scheduling |
 
@@ -219,7 +219,7 @@ jobs:
     adhoc: true
 ```
 
-Without `shell`, commands are executed directly (split by whitespace). With `shell`, the full command string is passed to the shell via `-c`, which enables pipes, redirects, and shell syntax.
+Without `shell`, commands run through the system default shell (`/bin/bash` on Linux/macOS, `powershell` on Windows). With an explicit `shell`, the full command string is passed to that shell via `-c` (or `-Command` for PowerShell), which enables pipes, redirects, and shell syntax.
 
 Job-level `env` is merged with the process environment and any `.env` file. CLI `KEY=VALUE` args take highest priority.
 
