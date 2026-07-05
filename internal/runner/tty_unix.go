@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -14,10 +15,60 @@ import (
 	"golang.org/x/term"
 )
 
+// stripANSI removes common ANSI/VT100 escape sequences from s so that
+// PTY-captured output is readable in notifications and logs.
+func stripANSI(s string) string {
+	// ECMA-48 CSI sequences: ESC [ ... final_byte
+	// Also strips OSC sequences: ESC ] ... BEL/ST
+	result := make([]byte, 0, len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' {
+			i++
+			if i >= len(s) {
+				break
+			}
+			if s[i] == '[' {
+				// CSI sequence: skip until final byte (0x40–0x7E)
+				i++
+				for i < len(s) && (s[i] < 0x40 || s[i] > 0x7E) {
+					i++
+				}
+				if i < len(s) {
+					i++
+				}
+				continue
+			}
+			if s[i] == ']' {
+				// OSC sequence: skip until BEL (0x07) or ST (ESC \)
+				i++
+				for i < len(s) {
+					if s[i] == '\x07' {
+						i++
+						break
+					}
+					if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+				continue
+			}
+			// Other 2-byte ESC sequences (ESC + one char)
+			i++
+			continue
+		}
+		result = append(result, s[i])
+		i++
+	}
+	return string(result)
+}
+
 // runCommandTTY runs cmd attached to a pseudo-terminal, with the parent's
 // stdin in raw mode and SIGWINCH forwarded so the child sees window resizes.
-// Output is streamed live to os.Stdout — nothing is captured into a buffer
-// or log file (PTY output contains ANSI escape codes that pollute logs).
+// Output is streamed live to os.Stdout and also captured into a buffer
+// (with ANSI escapes stripped) so notify: output and logs get clean text.
 //
 // The timeout argument is accepted for signature symmetry with the buffered
 // path but is ignored: ad-hoc TTY commands run until they exit on their own
@@ -66,25 +117,25 @@ func runCommandTTY(cmd *exec.Cmd, _ int) (int, string) {
 	}
 	defer func() { _ = term.Restore(stdinFd, oldState) }()
 
-	// Bidirectional copy: parent stdin → PTY, PTY → parent stdout.
-	// stdin→pty in a goroutine; pty→stdout blocks here until the
+	// Bidirectional copy: parent stdin → PTY, PTY → parent stdout + capture buffer.
+	// stdin→pty in a goroutine; pty→(stdout+buffer) blocks here until the
 	// child closes the PTY.
+	var buf bytes.Buffer
 	go func() { _, _ = io.Copy(ptmx, os.Stdin) }()
-	_, _ = io.Copy(os.Stdout, ptmx)
+	_, _ = io.Copy(io.MultiWriter(os.Stdout, &buf), ptmx)
+
+	output := stripANSI(buf.String())
 
 	waited = true
 	err = cmd.Wait()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			// Ctrl+C in the PTY is delivered to the child as SIGINT via the
-			// terminal line discipline. signalRC surfaces it as 128+sig so
-			// runJob can classify the exit as "interrupted" not "failed".
 			if rc := signalRC(exitErr); rc != 0 {
-				return rc, ""
+				return rc, output
 			}
-			return exitErr.ExitCode(), ""
+			return exitErr.ExitCode(), output
 		}
 		return -2, err.Error()
 	}
-	return 0, ""
+	return 0, output
 }
