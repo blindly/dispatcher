@@ -219,7 +219,9 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 		attempt++
 	}
 
-	if strings.TrimSpace(output) != "" {
+	// In TTY mode, output was already streamed live to the terminal —
+	// skip the buffered print to avoid doubling.
+	if !(interactive && stdinIsTTY()) && strings.TrimSpace(output) != "" {
 		fmt.Println(output)
 	}
 
