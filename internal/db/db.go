@@ -223,6 +223,95 @@ func deriveValidMinutes(anchor int, intervalMin int) []int {
 	return out
 }
 
+// ComputeNextRun returns the next time a job will actually execute, considering
+// at_minute alignment, active_hours, and active days. It starts from the stored
+// next_run_at (or now if not set/already past) and advances forward until all
+// constraints are satisfied.
+func ComputeNextRun(job *config.JobConfig, nextRunStr string, tzName string) time.Time {
+	now := NowUTC()
+	loc, _ := time.LoadLocation(tzName)
+
+	// Parse next_run_at; fall back to now if missing or already past
+	candidate := now
+	if nextRunStr != "" {
+		if t, err := time.Parse(time.RFC3339, nextRunStr); err == nil && t.After(now) {
+			candidate = t
+		}
+	}
+
+	// If no scheduling constraints, return as-is
+	if job.ActiveHours == nil && job.ActiveDays == nil {
+		return candidate
+	}
+
+	// Advance up to 8 days (covers a full week + 1 day) looking for a valid slot
+	deadline := now.AddDate(0, 0, 8)
+	for candidate.Before(deadline) {
+		if !IsOnActiveDayAt(job.ActiveDays, candidate, loc) {
+			// Skip to end of this day in the job's timezone
+			localT := candidate.In(loc)
+			nextDay := time.Date(localT.Year(), localT.Month(), localT.Day()+1, 0, 0, 0, 0, loc)
+			candidate = nextDay.UTC()
+			continue
+		}
+		if !IsInActiveHoursAt(job.ActiveHours, candidate, loc) {
+			// If before active window, jump to start of window
+			localT := candidate.In(loc)
+			startHour := job.ActiveHours[0]
+			// Check for overnight wrap: if end <= start and we're past end, jump to start of next day's window
+			if job.ActiveHours[1] <= job.ActiveHours[0] && localT.Hour() >= job.ActiveHours[1] && localT.Hour() < job.ActiveHours[0] {
+				// We're in the gap between end and start of a wrapping window — jump to start
+				jump := time.Date(localT.Year(), localT.Month(), localT.Day(), startHour, 0, 0, 0, loc)
+				if !jump.After(candidate) {
+					jump = jump.AddDate(0, 0, 1)
+				}
+				candidate = jump.UTC()
+				continue
+			}
+			jump := time.Date(localT.Year(), localT.Month(), localT.Day(), startHour, 0, 0, 0, loc)
+			if !jump.After(candidate) {
+				jump = jump.AddDate(0, 0, 1)
+			}
+			candidate = jump.UTC()
+			continue
+		}
+		// All constraints satisfied
+		return candidate
+	}
+
+	// Fallback: return the original candidate
+	return candidate
+}
+
+// IsOnActiveDayAt checks if the given time falls on an active day.
+func IsOnActiveDayAt(days *[7]bool, t time.Time, loc *time.Location) bool {
+	if days == nil {
+		return true
+	}
+	if loc != nil {
+		return days[int(t.In(loc).Weekday())]
+	}
+	return days[int(t.Weekday())]
+}
+
+// IsInActiveHoursAt checks if the given time falls within active hours.
+func IsInActiveHoursAt(hours *[2]int, t time.Time, loc *time.Location) bool {
+	if hours == nil {
+		return true
+	}
+	var hour int
+	if loc != nil {
+		hour = t.In(loc).Hour()
+	} else {
+		hour = t.Hour()
+	}
+	start, end := hours[0], hours[1]
+	if start <= end {
+		return hour >= start && hour < end
+	}
+	return hour >= start || hour < end
+}
+
 func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {
 	now := NowUTC().Format(time.RFC3339)
 	rows, err := db.Query("SELECT name, force_next FROM cron_jobs WHERE next_run_at <= ? ORDER BY next_run_at", now)

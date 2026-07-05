@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -352,6 +353,115 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 
 	if len(scheduled) == 0 && len(adhoc) == 0 {
 		fmt.Println("\nNo jobs configured.")
+	}
+	fmt.Println()
+}
+
+// NextRunEntry holds computed next-run info for display.
+type NextRunEntry struct {
+	Name        string
+	NextRun     time.Time
+	Until       time.Duration
+	DependsOn   string
+	IsAdhoc     bool
+	IsPaused    bool
+	HasRun      bool // whether the job has ever run
+}
+
+// FormatDurationHuman returns a human-readable relative time string (e.g., "in 5m", "in 2h", "in 3d").
+func FormatDurationHuman(d time.Duration) string {
+	if d < 0 {
+		return "overdue"
+	}
+	if d < time.Minute {
+		return "now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("in %dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("in %dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("in %dd", int(d.Hours()/24))
+}
+
+func PrintNextRuns(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
+	now := db.NowUTC()
+
+	rows, err := conn.Query("SELECT name, next_run_at, last_status FROM cron_jobs ORDER BY name")
+	if err != nil {
+		fmt.Printf("Error querying jobs: %v\n", err)
+		return
+	}
+	defer rows.Close()
+
+	var entries []NextRunEntry
+	for rows.Next() {
+		var name, nextRunStr string
+		var lastStatus sql.NullString
+		rows.Scan(&name, &nextRunStr, &lastStatus)
+
+		job, ok := jobs[name]
+		if !ok {
+			continue
+		}
+
+		if job.Adhoc || job.Paused {
+			continue
+		}
+
+		nextRun := db.ComputeNextRun(job, nextRunStr, tzName)
+		if nextRun.Before(now) || nextRun == now {
+			nextRun = now
+		}
+
+		entries = append(entries, NextRunEntry{
+			Name:      name,
+			NextRun:   nextRun,
+			Until:     nextRun.Sub(now),
+			DependsOn: job.DependsOn,
+			IsAdhoc:   job.Adhoc,
+			IsPaused:  job.Paused,
+			HasRun:    lastStatus.Valid,
+		})
+	}
+
+	if len(entries) == 0 {
+		fmt.Println("No scheduled jobs.")
+		return
+	}
+
+	// Sort by next run time
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].NextRun.Before(entries[j].NextRun)
+	})
+
+	// Column widths
+	nameWidth := 20
+	for _, e := range entries {
+		if len(e.Name) > nameWidth {
+			nameWidth = len(e.Name)
+		}
+	}
+	nameWidth += 2
+
+	fmt.Printf("%-*s  %-19s  %-10s  %s\n", nameWidth, "Job", "Next Run", "In", "Depends On")
+	fmt.Println(strings.Repeat("-", nameWidth+19+10+13))
+
+	loc, _ := time.LoadLocation(tzName)
+	for _, e := range entries {
+		var localTime string
+		if loc != nil {
+			localTime = e.NextRun.In(loc).Format("2006-01-02 15:04")
+		} else {
+			localTime = e.NextRun.Format("2006-01-02 15:04")
+		}
+		until := FormatDurationHuman(e.Until)
+		depends := e.DependsOn
+		if depends == "" {
+			depends = "-"
+		}
+		fmt.Printf("%-*s  %-19s  %-10s  %s\n", nameWidth, e.Name, localTime, until, depends)
 	}
 	fmt.Println()
 }

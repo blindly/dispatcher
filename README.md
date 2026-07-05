@@ -313,6 +313,7 @@ dispatch run deploy ENV=production VERSION=1.2.3 -- --no-cache
 ```bash
 dispatch                 # run due jobs (the cron use case)
 dispatch list            # full job status table
+dispatch next            # show upcoming jobs sorted by next run
 dispatch status          # quick summary + cron state
 dispatch run <job>       # force-run with DB tracking (alias: exec)
 dispatch run-once <job>  # run without DB tracking
@@ -462,7 +463,7 @@ Least reliable: upload-backup (96.6%)
 
 ```
 Dispatcher
-  Version:       v1.10.1
+  Version:       v1.14.3
   Config:        /srv/myapp/Dispatcher.yaml
   Data dir:      /srv/myapp/.dispatcher
   Timezone:      America/New_York

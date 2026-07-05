@@ -636,3 +636,178 @@ func TestUpdateAfterRun_AtMinuteAligns(t *testing.T) {
 		t.Errorf("next_run minute = %d, want 30", nextRun.Minute())
 	}
 }
+
+func TestComputeNextRun_NoConstraints(t *testing.T) {
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 300}
+	// Future next_run_at should be returned as-is
+	nextRun := "2026-07-06T10:00:00Z"
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_PastNextRunFallsBackToNow(t *testing.T) {
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 300}
+	past := "2020-01-01T00:00:00Z"
+	result := ComputeNextRun(job, past, "UTC")
+	now := NowUTC()
+	// Should be approximately now (within a few seconds)
+	diff := result.Sub(now)
+	if diff < -time.Second || diff > 2*time.Second {
+		t.Errorf("expected ~now, got %s (diff=%s)", result, diff)
+	}
+}
+
+func TestComputeNextRun_EmptyNextRun(t *testing.T) {
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 300}
+	result := ComputeNextRun(job, "", "UTC")
+	now := NowUTC()
+	diff := result.Sub(now)
+	if diff < -time.Second || diff > 2*time.Second {
+		t.Errorf("expected ~now, got %s (diff=%s)", result, diff)
+	}
+}
+
+func TestComputeNextRun_ActiveHoursWithinWindow(t *testing.T) {
+	hours := [2]int{9, 17}
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
+	// 10:00 UTC on a weekday is within the 9-17 UTC window
+	nextRun := "2026-07-06T10:00:00Z" // Monday
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_ActiveHoursBeforeWindow(t *testing.T) {
+	hours := [2]int{9, 17}
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
+	// 08:00 UTC is before the 9-17 window — should jump to 09:00
+	nextRun := "2026-07-06T08:00:00Z"
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 6, 9, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_ActiveHoursAfterWindow(t *testing.T) {
+	hours := [2]int{9, 17}
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
+	// 18:00 UTC is after the 9-17 window — should jump to next day 09:00
+	nextRun := "2026-07-06T18:00:00Z"
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_ActiveHoursOvernight(t *testing.T) {
+	hours := [2]int{22, 6}
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
+	// 03:00 UTC is within the 22-6 overnight window
+	nextRun := "2026-07-06T03:00:00Z"
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 6, 3, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_ActiveHoursOvernightGap(t *testing.T) {
+	hours := [2]int{22, 6}
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
+	// 12:00 UTC is in the gap between 06:00 end and 22:00 start — should jump to 22:00 same day
+	nextRun := "2026-07-06T12:00:00Z"
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 6, 22, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_ActiveDaysFilter(t *testing.T) {
+	// Weekdays only
+	weekdays := [7]bool{false, true, true, true, true, true, false}
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveDays: &weekdays}
+	// Saturday July 4 2026 at 10:00 UTC — should skip to Monday July 6
+	nextRun := "2026-07-04T10:00:00Z"
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_ActiveDaysAndHoursCombined(t *testing.T) {
+	hours := [2]int{9, 17}
+	weekdays := [7]bool{false, true, true, true, true, true, false}
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours, ActiveDays: &weekdays}
+	// Friday July 10 2026 at 18:00 UTC — after hours on a weekday, should jump to Monday 09:00
+	nextRun := "2026-07-10T18:00:00Z"
+	result := ComputeNextRun(job, nextRun, "UTC")
+	want := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestIsOnActiveDayAt_Nil(t *testing.T) {
+	loc, _ := time.LoadLocation("UTC")
+	if !IsOnActiveDayAt(nil, time.Now(), loc) {
+		t.Error("nil days should always be active")
+	}
+}
+
+func TestIsInActiveHoursAt_Nil(t *testing.T) {
+	loc, _ := time.LoadLocation("UTC")
+	if !IsInActiveHoursAt(nil, time.Now(), loc) {
+		t.Error("nil hours should always be active")
+	}
+}
+
+func TestIsInActiveHoursAt_NormalRange(t *testing.T) {
+	loc, _ := time.LoadLocation("UTC")
+	hours := [2]int{9, 17}
+	t09 := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	t12 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	t17 := time.Date(2026, 1, 1, 17, 0, 0, 0, time.UTC)
+	t08 := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+	if !IsInActiveHoursAt(&hours, t09, loc) {
+		t.Error("9:00 should be in 9-17")
+	}
+	if !IsInActiveHoursAt(&hours, t12, loc) {
+		t.Error("12:00 should be in 9-17")
+	}
+	if IsInActiveHoursAt(&hours, t17, loc) {
+		t.Error("17:00 should not be in 9-17 (exclusive end)")
+	}
+	if IsInActiveHoursAt(&hours, t08, loc) {
+		t.Error("8:00 should not be in 9-17")
+	}
+}
+
+func TestIsInActiveHoursAt_OvernightRange(t *testing.T) {
+	loc, _ := time.LoadLocation("UTC")
+	hours := [2]int{22, 6}
+	t22 := time.Date(2026, 1, 1, 22, 0, 0, 0, time.UTC)
+	t03 := time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC)
+	t10 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	t06 := time.Date(2026, 1, 1, 6, 0, 0, 0, time.UTC)
+	if !IsInActiveHoursAt(&hours, t22, loc) {
+		t.Error("22:00 should be in 22-6")
+	}
+	if !IsInActiveHoursAt(&hours, t03, loc) {
+		t.Error("03:00 should be in 22-6")
+	}
+	if IsInActiveHoursAt(&hours, t10, loc) {
+		t.Error("10:00 should not be in 22-6")
+	}
+	if IsInActiveHoursAt(&hours, t06, loc) {
+		t.Error("06:00 should not be in 22-6 (exclusive end)")
+	}
+}

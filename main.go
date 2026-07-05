@@ -27,6 +27,7 @@ Commands:
   (default)    Run due jobs
   init         Create a default Dispatcher.yaml
   list, ls     Show job status table (-a to include paused)
+  next         Show upcoming scheduled jobs sorted by next run
   status, ps   Quick summary (-a to include paused)
   analytics    Job success rates and run history
   history      Show last 20 runs for a job
@@ -498,6 +499,11 @@ func main() {
 		}
 		display.PrintPauseBanner(pauseMsg)
 		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone, showAll)
+		return
+	}
+
+	if cmd == "next" {
+		display.PrintNextRuns(conn, cfg.Jobs, cfg.Timezone)
 		return
 	}
 

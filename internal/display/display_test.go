@@ -3,10 +3,30 @@ package display
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/blindly/dispatcher/internal/config"
 	"github.com/blindly/dispatcher/internal/db"
 )
+
+func TestFormatDurationHuman(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{-1 * time.Minute, "overdue"},
+		{30 * time.Second, "now"},
+		{5 * time.Minute, "in 5m"},
+		{2 * time.Hour, "in 2h"},
+		{3 * 24 * time.Hour, "in 3d"},
+	}
+	for _, tt := range tests {
+		got := FormatDurationHuman(tt.d)
+		if got != tt.want {
+			t.Errorf("FormatDurationHuman(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}
 
 func TestFormatInterval_Minutes(t *testing.T) {
 	if got := FormatInterval(300); got != "5m" {
