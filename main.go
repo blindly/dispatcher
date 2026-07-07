@@ -299,7 +299,8 @@ func main() {
 
 	// enable/disable don't need DB
 	if cmd == "enable" {
-		if cfg.Scheduler == "systemd" {
+		sched := cfg.EffectiveScheduler()
+		if sched == "systemd" {
 			enableSystemd(cfg, configDir)
 		} else {
 			enableCron(cfg.Schedule, configDir)
@@ -307,7 +308,8 @@ func main() {
 		return
 	}
 	if cmd == "disable" {
-		if cfg.Scheduler == "systemd" {
+		sched := cfg.EffectiveScheduler()
+		if sched == "systemd" {
 			disableSystemd(configDir)
 		} else {
 			disableCron(configDir)
@@ -317,15 +319,10 @@ func main() {
 
 	if cmd == "validate" {
 		fmt.Printf("Config OK: %s (%d jobs)\n", configPath, len(cfg.Jobs))
-		fmt.Printf("  Scheduler:   %s\n", cfg.Scheduler)
-		if cfg.Scheduler == "systemd" {
-			if _, err := os.Stat("/run/systemd/system"); err != nil {
-				fmt.Printf("  WARNING:     systemd not detected (scheduler set to systemd)\n")
-			}
-		} else if cfg.Scheduler == "cron" {
-			if _, err := exec.Command("crontab", "-l").CombinedOutput(); err != nil {
-				fmt.Printf("  WARNING:     crontab not available (scheduler set to cron)\n")
-			}
+		if cfg.Scheduler != "" {
+			fmt.Printf("  Scheduler:   %s (explicit)\n", cfg.Scheduler)
+		} else {
+			fmt.Printf("  Scheduler:   auto-detect\n")
 		}
 		for name, job := range cfg.Jobs {
 			issues := validateJob(name, job, cfg.Jobs)
@@ -552,8 +549,9 @@ func main() {
 			}
 		}
 		display.PrintPauseBanner(pauseMsg)
-		schedStatus := resolveSchedulerStatus(cfg.Scheduler, configDir)
-		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll, cfg.Scheduler, schedStatus)
+		sched := cfg.EffectiveScheduler()
+		schedStatus := resolveSchedulerStatus(sched, configDir)
+		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll, sched, schedStatus)
 		return
 	}
 

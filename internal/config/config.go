@@ -52,11 +52,16 @@ type DispatcherConfig struct {
 	Timezone     string            `yaml:"timezone"`
 	Notify       NotifyConfig      `yaml:"notify"`
 	Jobs         map[string]*JobConfig
-	Scheduler    string            `yaml:"scheduler"` // "systemd" or "cron"
+	Scheduler    string            `yaml:"scheduler"` // "systemd", "cron", or "" (auto)
 	Schedule     string            `yaml:"schedule"`
 	Retention    int               `yaml:"-"` // days, parsed from retention
 	PauseTimeout int              `yaml:"-"` // seconds, parsed from pause_timeout
 	Vars         map[string]string `yaml:"vars"`
+}
+
+// EffectiveScheduler returns the resolved scheduler type (auto-detects if not set).
+func (c *DispatcherConfig) EffectiveScheduler() string {
+	return ResolveScheduler(c.Scheduler)
 }
 
 // stringOrList handles YAML values that can be either a string or list of strings.
@@ -304,8 +309,6 @@ func Load(path string) (*DispatcherConfig, error) {
 		schedule = "*/5 * * * *"
 	}
 
-	scheduler := ResolveScheduler(raw.Scheduler)
-
 	retention := 90 // default 90 days
 	if raw.Retention != "" {
 		retSec, err := ParseInterval(raw.Retention)
@@ -331,7 +334,7 @@ func Load(path string) (*DispatcherConfig, error) {
 		Timezone:     raw.Timezone,
 		Notify:       raw.Notify,
 		Jobs:         make(map[string]*JobConfig),
-		Scheduler:    scheduler,
+		Scheduler:    raw.Scheduler,
 		Schedule:     schedule,
 		Retention:    retention,
 		PauseTimeout: pauseTimeout,

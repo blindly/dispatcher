@@ -23,14 +23,15 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	fmt.Printf("  Data dir:      %s\n", dispDir)
 	fmt.Printf("  Timezone:      %s\n", cfg.Timezone)
 	fmt.Printf("  Schedule:      %s\n", cfg.Schedule)
-	fmt.Printf("  Scheduler:     %s\n", cfg.Scheduler)
+	sched := cfg.EffectiveScheduler()
+	fmt.Printf("  Scheduler:     %s\n", sched)
 	fmt.Printf("  Retention:     %dd\n", cfg.Retention)
 	fmt.Printf("  Pause timeout: %s\n", display.FormatInterval(cfg.PauseTimeout))
 	fmt.Println()
 
 	// Scheduler status
 	fmt.Println("Scheduler")
-	if cfg.Scheduler == "systemd" {
+	if sched == "systemd" {
 		if installed, detail := isSystemdInstalled(configDir); installed {
 			fmt.Println("  Status:        enabled")
 			fmt.Printf("  Type:          systemd\n")
