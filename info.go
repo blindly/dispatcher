@@ -36,6 +36,12 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 			fmt.Println("  Status:        enabled")
 			fmt.Printf("  Type:          systemd\n")
 			fmt.Printf("  Detail:        %s\n", detail)
+			onCal, err := cronToOnCalendar(cfg.Schedule)
+			if err == nil {
+				if !strings.Contains(detail, onCal) {
+					fmt.Printf("  WARNING:       Config schedule (%s) differs from timer — run 'dispatch reload'\n", cfg.Schedule)
+				}
+			}
 		} else {
 			fmt.Println("  Status:        disabled")
 			fmt.Println("  Type:          systemd")
@@ -45,6 +51,9 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 			fmt.Println("  Status:        enabled")
 			fmt.Println("  Type:          cron")
 			fmt.Printf("  Entry:         %s\n", entry)
+			if !strings.Contains(entry, cfg.Schedule) {
+				fmt.Printf("  WARNING:       Config schedule (%s) differs from crontab — run 'dispatch reload'\n", cfg.Schedule)
+			}
 		} else {
 			fmt.Println("  Status:        disabled")
 			fmt.Println("  Type:          cron")

@@ -41,6 +41,7 @@ Commands:
   retry        Reset all failed jobs to run next cycle
   purge        Delete old run history (default: retention config)
   validate     Check config syntax
+  reload       Reload scheduler config from Dispatcher.yaml
   logs         Show recent log output for a job
   watch        Live tail of job logs (all or specific job)
   notify       Send a live notification (for use inside jobs)
@@ -329,6 +330,16 @@ func main() {
 			for _, issue := range issues {
 				fmt.Printf("  WARNING: %s\n", issue)
 			}
+		}
+		return
+	}
+
+	if cmd == "reload" {
+		sched := cfg.EffectiveScheduler()
+		if sched == "systemd" {
+			enableSystemd(cfg, configDir)
+		} else {
+			enableCron(cfg.Schedule, configDir)
 		}
 		return
 	}
