@@ -270,6 +270,9 @@ func isSystemdInstalled(configDir string) (bool, string) {
 	if err != nil {
 		return true, status
 	}
-	onCal := strings.TrimSpace(string(out))
+	onCal := strings.TrimSpace(strings.ReplaceAll(string(out), "\n", "; "))
+	if onCal == "" || onCal == "n/a" {
+		return true, status
+	}
 	return true, "active (" + onCal + ")"
 }

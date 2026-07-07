@@ -35,12 +35,8 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 		if installed, detail := isSystemdInstalled(configDir); installed {
 			fmt.Println("  Status:        enabled")
 			fmt.Printf("  Type:          systemd\n")
-			fmt.Printf("  Detail:        %s\n", detail)
-			onCal, err := cronToOnCalendar(cfg.Schedule)
-			if err == nil {
-				if !strings.Contains(detail, onCal) {
-					fmt.Printf("  WARNING:       Config schedule (%s) differs from timer — run 'dispatch reload'\n", cfg.Schedule)
-				}
+			if detail != "" {
+				fmt.Printf("  Detail:        %s\n", detail)
 			}
 		} else {
 			fmt.Println("  Status:        disabled")
