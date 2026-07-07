@@ -52,6 +52,7 @@ type DispatcherConfig struct {
 	Timezone     string            `yaml:"timezone"`
 	Notify       NotifyConfig      `yaml:"notify"`
 	Jobs         map[string]*JobConfig
+	AllowUpdate  bool              `yaml:"-"` // false = air-gapped, update disabled
 	Scheduler    string            `yaml:"scheduler"` // "systemd", "cron", or "" (auto)
 	Schedule     string            `yaml:"schedule"`
 	Retention    int               `yaml:"-"` // days, parsed from retention
@@ -111,6 +112,7 @@ type rawConfig struct {
 	PauseTimeout   string            `yaml:"pause_timeout"`
 	DBPath         string            `yaml:"db_path"` // accepted but unused (removed, default is .dispatcher/data.db)
 	DiscordWebhook string            `yaml:"discord_webhook"`
+	Update         *bool             `yaml:"update"` // nil = enabled, false = air-gapped
 	Vars           map[string]string `yaml:"vars"`
 }
 
@@ -338,6 +340,7 @@ func Load(path string) (*DispatcherConfig, error) {
 		Schedule:     schedule,
 		Retention:    retention,
 		PauseTimeout: pauseTimeout,
+		AllowUpdate:  raw.Update == nil || *raw.Update,
 		Vars:         vars,
 	}
 

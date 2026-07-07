@@ -167,6 +167,7 @@ func initConfig() {
 	defaultConfig := `timezone: America/New_York
 # scheduler: systemd     # or "cron" — auto-detected if omitted
 # schedule: "*/5 * * * *"
+# update: false          # set to false in air-gapped environments
 # retention: 90d
 # pause_timeout: 1h
 
@@ -250,18 +251,6 @@ func main() {
 		return
 	}
 
-	if cmd == "update" {
-		targetVersion := ""
-		if len(args) > 0 {
-			targetVersion = args[0]
-		}
-		if err := selfUpdate(targetVersion); err != nil {
-			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	if cmd == "init" {
 		initConfig()
 		return
@@ -296,6 +285,23 @@ func main() {
 		configDir, _ = os.Getwd()
 	} else {
 		configDir, _ = filepath.Abs(configDir)
+	}
+
+	// update doesn't need DB or lock
+	if cmd == "update" {
+		if !cfg.AllowUpdate {
+			fmt.Println("Update disabled (air-gapped environment)")
+			return
+		}
+		targetVersion := ""
+		if len(args) > 0 {
+			targetVersion = args[0]
+		}
+		if err := selfUpdate(targetVersion); err != nil {
+			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// enable/disable don't need DB
