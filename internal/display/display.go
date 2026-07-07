@@ -131,7 +131,7 @@ func PrintPauseBanner(pauseMsg string) {
 	}
 }
 
-func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string, showAll bool) {
+func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string, showAll bool, schedulerType string, schedulerStatus string) {
 	now := db.NowUTC()
 
 	var totalJobs, dueCount, runningCount, failedCount int
@@ -199,9 +199,9 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		lastDispatchStr = formatTimeAgo(now, v)
 	}
 
-	cronStatus := "disabled"
-	if installed, schedule := IsCronInstalled(projectDir); installed {
-		cronStatus = "enabled (" + schedule + ")"
+	schedLabel := "Cron"
+	if schedulerType == "systemd" {
+		schedLabel = "Systemd"
 	}
 
 	statusLine := fmt.Sprintf("Last dispatch: %s", lastDispatchStr)
@@ -234,7 +234,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		}
 	}
 	fmt.Println(statusLine)
-	fmt.Printf("Cron: %s\n", cronStatus)
+	fmt.Printf("%s: %s\n", schedLabel, schedulerStatus)
 }
 
 type jobRow struct {

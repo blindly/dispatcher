@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -51,6 +52,7 @@ type DispatcherConfig struct {
 	Timezone     string            `yaml:"timezone"`
 	Notify       NotifyConfig      `yaml:"notify"`
 	Jobs         map[string]*JobConfig
+	Scheduler    string            `yaml:"scheduler"` // "systemd" or "cron"
 	Schedule     string            `yaml:"schedule"`
 	Retention    int               `yaml:"-"` // days, parsed from retention
 	PauseTimeout int              `yaml:"-"` // seconds, parsed from pause_timeout
@@ -98,6 +100,7 @@ type rawConfig struct {
 	Timezone       string            `yaml:"timezone"`
 	Notify         NotifyConfig      `yaml:"notify"`
 	Jobs           map[string]rawJob `yaml:"jobs"`
+	Scheduler      string            `yaml:"scheduler"`
 	Schedule       string            `yaml:"schedule"`
 	Retention      string            `yaml:"retention"`
 	PauseTimeout   string            `yaml:"pause_timeout"`
@@ -155,6 +158,41 @@ func ParseInterval(s string) (int, error) {
 	value, _ := strconv.Atoi(m[1])
 	multipliers := map[string]int{"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 	return value * multipliers[m[2]], nil
+}
+
+// DetectScheduler checks for systemd and cron availability.
+// Returns "systemd" if systemd is found, "cron" if crontab is available, else "".
+func DetectScheduler() string {
+	// Check for systemd: /run/systemd/system must exist AND systemctl --version must work
+	if _, err := os.Stat("/run/systemd/system"); err == nil {
+		if _, err := exec.Command("systemctl", "--version").CombinedOutput(); err == nil {
+			return "systemd"
+		}
+	}
+	// Fallback to cron
+	if _, err := exec.Command("crontab", "-l").CombinedOutput(); err == nil {
+		return "cron"
+	}
+	// Also try which crontab as last resort
+	if _, err := exec.LookPath("crontab"); err == nil {
+		return "cron"
+	}
+	return ""
+}
+
+// ResolveScheduler returns the effective scheduler type.
+// If the user set one explicitly, use it. Otherwise auto-detect (prefer systemd).
+func ResolveScheduler(userValue string) string {
+	userValue = strings.TrimSpace(userValue)
+	if userValue == "systemd" || userValue == "cron" {
+		return userValue
+	}
+	// Auto-detect; default to systemd if available, else cron
+	detected := DetectScheduler()
+	if detected == "" {
+		return "cron" // ultimate fallback
+	}
+	return detected
 }
 
 // ExpandVars replaces {{.KEY}} with values from the vars map.
@@ -266,6 +304,8 @@ func Load(path string) (*DispatcherConfig, error) {
 		schedule = "*/5 * * * *"
 	}
 
+	scheduler := ResolveScheduler(raw.Scheduler)
+
 	retention := 90 // default 90 days
 	if raw.Retention != "" {
 		retSec, err := ParseInterval(raw.Retention)
@@ -291,6 +331,7 @@ func Load(path string) (*DispatcherConfig, error) {
 		Timezone:     raw.Timezone,
 		Notify:       raw.Notify,
 		Jobs:         make(map[string]*JobConfig),
+		Scheduler:    scheduler,
 		Schedule:     schedule,
 		Retention:    retention,
 		PauseTimeout: pauseTimeout,

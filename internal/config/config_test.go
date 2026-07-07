@@ -1047,3 +1047,29 @@ jobs:
 	}
 	// Note: the scheduler will derive [0, 15, 30, 45] from interval + at_minute at runtime.
 }
+
+func TestResolveScheduler_ExplicitSystemd(t *testing.T) {
+	if got := ResolveScheduler("systemd"); got != "systemd" {
+		t.Errorf("ResolveScheduler(systemd) = %q, want systemd", got)
+	}
+}
+
+func TestResolveScheduler_ExplicitCron(t *testing.T) {
+	if got := ResolveScheduler("cron"); got != "cron" {
+		t.Errorf("ResolveScheduler(cron) = %q, want cron", got)
+	}
+}
+
+func TestResolveScheduler_EmptyAutoDetects(t *testing.T) {
+	got := ResolveScheduler("")
+	if got != "systemd" && got != "cron" {
+		t.Errorf("ResolveScheduler(\"\") = %q, want systemd or cron", got)
+	}
+}
+
+func TestResolveScheduler_InvalidDefaults(t *testing.T) {
+	got := ResolveScheduler("invalid")
+	if got != "systemd" && got != "cron" {
+		t.Errorf("ResolveScheduler(invalid) = %q, want systemd or cron", got)
+	}
+}

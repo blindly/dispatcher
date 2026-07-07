@@ -164,6 +164,7 @@ func initConfig() {
 	}
 
 	defaultConfig := `timezone: America/New_York
+# scheduler: systemd     # or "cron" — auto-detected if omitted
 # schedule: "*/5 * * * *"
 # retention: 90d
 # pause_timeout: 1h
@@ -298,16 +299,34 @@ func main() {
 
 	// enable/disable don't need DB
 	if cmd == "enable" {
-		enableCron(cfg.Schedule, configDir)
+		if cfg.Scheduler == "systemd" {
+			enableSystemd(cfg, configDir)
+		} else {
+			enableCron(cfg.Schedule, configDir)
+		}
 		return
 	}
 	if cmd == "disable" {
-		disableCron(configDir)
+		if cfg.Scheduler == "systemd" {
+			disableSystemd(configDir)
+		} else {
+			disableCron(configDir)
+		}
 		return
 	}
 
 	if cmd == "validate" {
 		fmt.Printf("Config OK: %s (%d jobs)\n", configPath, len(cfg.Jobs))
+		fmt.Printf("  Scheduler:   %s\n", cfg.Scheduler)
+		if cfg.Scheduler == "systemd" {
+			if _, err := os.Stat("/run/systemd/system"); err != nil {
+				fmt.Printf("  WARNING:     systemd not detected (scheduler set to systemd)\n")
+			}
+		} else if cfg.Scheduler == "cron" {
+			if _, err := exec.Command("crontab", "-l").CombinedOutput(); err != nil {
+				fmt.Printf("  WARNING:     crontab not available (scheduler set to cron)\n")
+			}
+		}
 		for name, job := range cfg.Jobs {
 			issues := validateJob(name, job, cfg.Jobs)
 			for _, issue := range issues {
@@ -533,7 +552,8 @@ func main() {
 			}
 		}
 		display.PrintPauseBanner(pauseMsg)
-		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll)
+		schedStatus := resolveSchedulerStatus(cfg.Scheduler, configDir)
+		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll, cfg.Scheduler, schedStatus)
 		return
 	}
 
@@ -843,6 +863,20 @@ func parseJobArgs(args []string) (extraEnv []string, extraArgs []string) {
 }
 
 // acquireLock and releaseLock are in lock_unix.go / lock_windows.go
+
+func resolveSchedulerStatus(schedulerType string, configDir string) string {
+	if schedulerType == "systemd" {
+		if installed, detail := isSystemdInstalled(configDir); installed {
+			return detail
+		}
+		return "disabled"
+	}
+	// cron
+	if installed, schedule := display.IsCronInstalled(configDir); installed {
+		return "enabled (" + schedule + ")"
+	}
+	return "disabled"
+}
 
 func enableCron(schedule string, projectDir string) {
 	dispatchPath, err := os.Executable()

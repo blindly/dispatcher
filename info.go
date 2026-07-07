@@ -23,17 +23,31 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	fmt.Printf("  Data dir:      %s\n", dispDir)
 	fmt.Printf("  Timezone:      %s\n", cfg.Timezone)
 	fmt.Printf("  Schedule:      %s\n", cfg.Schedule)
+	fmt.Printf("  Scheduler:     %s\n", cfg.Scheduler)
 	fmt.Printf("  Retention:     %dd\n", cfg.Retention)
 	fmt.Printf("  Pause timeout: %s\n", display.FormatInterval(cfg.PauseTimeout))
 	fmt.Println()
 
-	// Cron
-	fmt.Println("Cron")
-	if installed, entry := display.IsCronInstalled(configDir); installed {
-		fmt.Println("  Status:        enabled")
-		fmt.Printf("  Entry:         %s\n", entry)
+	// Scheduler status
+	fmt.Println("Scheduler")
+	if cfg.Scheduler == "systemd" {
+		if installed, detail := isSystemdInstalled(configDir); installed {
+			fmt.Println("  Status:        enabled")
+			fmt.Printf("  Type:          systemd\n")
+			fmt.Printf("  Detail:        %s\n", detail)
+		} else {
+			fmt.Println("  Status:        disabled")
+			fmt.Println("  Type:          systemd")
+		}
 	} else {
-		fmt.Println("  Status:        disabled")
+		if installed, entry := display.IsCronInstalled(configDir); installed {
+			fmt.Println("  Status:        enabled")
+			fmt.Println("  Type:          cron")
+			fmt.Printf("  Entry:         %s\n", entry)
+		} else {
+			fmt.Println("  Status:        disabled")
+			fmt.Println("  Type:          cron")
+		}
 	}
 	fmt.Println()
 
