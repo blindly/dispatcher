@@ -640,9 +640,9 @@ func TestUpdateAfterRun_AtMinuteAligns(t *testing.T) {
 func TestComputeNextRun_NoConstraints(t *testing.T) {
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 300}
 	// Future next_run_at should be returned as-is
-	nextRun := "2026-07-06T10:00:00Z"
+	nextRun := "2026-07-13T10:00:00Z"
 	result := ComputeNextRun(job, nextRun, "UTC")
-	want := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
 	}
@@ -674,9 +674,9 @@ func TestComputeNextRun_ActiveHoursWithinWindow(t *testing.T) {
 	hours := [2]int{9, 17}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// 10:00 UTC on a weekday is within the 9-17 UTC window
-	nextRun := "2026-07-06T10:00:00Z" // Monday
+	nextRun := "2026-07-13T10:00:00Z" // Monday
 	result := ComputeNextRun(job, nextRun, "UTC")
-	want := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
 	}
@@ -686,9 +686,9 @@ func TestComputeNextRun_ActiveHoursBeforeWindow(t *testing.T) {
 	hours := [2]int{9, 17}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// 08:00 UTC is before the 9-17 window — should jump to 09:00
-	nextRun := "2026-07-06T08:00:00Z"
+	nextRun := "2026-07-13T08:00:00Z"
 	result := ComputeNextRun(job, nextRun, "UTC")
-	want := time.Date(2026, 7, 6, 9, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
 	}
@@ -698,9 +698,9 @@ func TestComputeNextRun_ActiveHoursAfterWindow(t *testing.T) {
 	hours := [2]int{9, 17}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// 18:00 UTC is after the 9-17 window — should jump to next day 09:00
-	nextRun := "2026-07-06T18:00:00Z"
+	nextRun := "2026-07-13T18:00:00Z"
 	result := ComputeNextRun(job, nextRun, "UTC")
-	want := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
 	}
@@ -710,9 +710,9 @@ func TestComputeNextRun_ActiveHoursOvernight(t *testing.T) {
 	hours := [2]int{22, 6}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// 03:00 UTC is within the 22-6 overnight window
-	nextRun := "2026-07-06T03:00:00Z"
+	nextRun := "2026-07-13T03:00:00Z"
 	result := ComputeNextRun(job, nextRun, "UTC")
-	want := time.Date(2026, 7, 6, 3, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 13, 3, 0, 0, 0, time.UTC)
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
 	}
@@ -722,9 +722,9 @@ func TestComputeNextRun_ActiveHoursOvernightGap(t *testing.T) {
 	hours := [2]int{22, 6}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// 12:00 UTC is in the gap between 06:00 end and 22:00 start — should jump to 22:00 same day
-	nextRun := "2026-07-06T12:00:00Z"
+	nextRun := "2026-07-13T12:00:00Z"
 	result := ComputeNextRun(job, nextRun, "UTC")
-	want := time.Date(2026, 7, 6, 22, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 13, 22, 0, 0, 0, time.UTC)
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
 	}
@@ -734,10 +734,10 @@ func TestComputeNextRun_ActiveDaysFilter(t *testing.T) {
 	// Weekdays only
 	weekdays := [7]bool{false, true, true, true, true, true, false}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveDays: &weekdays}
-	// Saturday July 4 2026 at 10:00 UTC — should skip to Monday July 6
-	nextRun := "2026-07-04T10:00:00Z"
+	// Saturday July 11 2026 at 10:00 UTC — should skip to Monday July 13
+	nextRun := "2026-07-11T10:00:00Z"
 	result := ComputeNextRun(job, nextRun, "UTC")
-	want := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
 	}
