@@ -334,8 +334,8 @@ dispatch purge           # delete old run history (uses retention config)
 dispatch purge 30d       # delete history older than 30 days
 dispatch validate        # check config syntax
 dispatch init            # create default config
-dispatch enable          # enable scheduler (install crontab entry from config)
-dispatch disable         # disable scheduler (remove crontab entry)
+dispatch enable          # enable scheduler (systemd timer or crontab)
+dispatch disable         # disable scheduler (remove timer or crontab entry)
 dispatch update          # self-update to latest stable release
 dispatch update beta     # update to latest beta/pre-release
 dispatch update v1.11.0  # update to a specific version
@@ -343,30 +343,40 @@ dispatch version         # show current version
 dispatch docs            # show full documentation
 ```
 
-## Crontab integration
+## Scheduling
 
-`dispatch enable` installs a crontab entry that runs the dispatcher on the schedule defined in `Dispatcher.yaml`:
+`dispatch enable` installs the scheduler to run the dispatcher on the interval defined in `Dispatcher.yaml`. By default it auto-detects whether your system has systemd or cron, preferring systemd:
 
 ```yaml
-schedule: "*/1 * * * *"   # check for due jobs every minute
+scheduler: systemd         # or "cron" — auto-detected if omitted
+schedule: "*/5 * * * *"    # defaults to every 5 minutes
 ```
 
-If omitted, defaults to `*/5 * * * *` (every 5 minutes). The `schedule:` field in the config is the single source of truth — there is no CLI override.
+### Systemd timer (preferred)
+
+On systems with systemd, `dispatch enable` installs a `.service` + `.timer` unit. When run as root, units are installed system-wide (`/etc/systemd/system/`). As a regular user, they're installed per-user (`~/.config/systemd/user/`).
+
+The `schedule:` cron expression is converted to systemd `OnCalendar` format. For example, `*/5 * * * *` becomes `*-*-* 00:00/5`.
 
 ```bash
-# Enable scheduler using schedule from config
-dispatch enable
+dispatch enable            # installs systemd timer
+dispatch disable           # removes systemd timer
+```
 
-# Change the schedule: edit Dispatcher.yaml and re-run enable.
-# enable is idempotent — it updates the existing crontab line if
-# the schedule changed, or prints "Already enabled" if nothing changed.
-dispatch enable
+### Cron (legacy)
 
+If systemd isn't available or you explicitly set `scheduler: cron`, `dispatch enable` installs a crontab entry. The `schedule:` field is the single source of truth:
+
+```bash
+dispatch enable            # installs crontab entry
+dispatch disable           # removes crontab entry
+```
+
+The `enable` command is idempotent — it updates the existing entry if `schedule:` changed, or prints "Already enabled" if nothing changed.
+
+```bash
 # Check current status
 dispatch status
-
-# Disable scheduler
-dispatch disable
 ```
 
 ## Notifications
