@@ -124,3 +124,26 @@ func TestPrintQuickStatus(t *testing.T) {
 	// Should print without error
 	PrintQuickStatus(conn, jobs, "America/New_York", t.TempDir(), false, "cron", "disabled")
 }
+
+func TestIsNarrowWidth(t *testing.T) {
+	tests := []struct {
+		name string
+		w    int
+		want bool
+	}{
+		{"unknown width (non-TTY) keeps wide layout", 0, false},
+		{"negative width keeps wide layout", -1, false},
+		{"exactly threshold keeps wide layout", compactThreshold, false},
+		{"one below threshold triggers compact", compactThreshold - 1, true},
+		{"typical 132-col screen triggers compact", 132, true},
+		{"80-col VTY triggers compact", 80, true},
+		{"typical 160-col screen keeps wide layout", 160, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isNarrowWidth(tt.w); got != tt.want {
+				t.Errorf("isNarrowWidth(%d) = %v, want %v", tt.w, got, tt.want)
+			}
+		})
+	}
+}

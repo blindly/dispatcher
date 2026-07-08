@@ -3,6 +3,7 @@ package display
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -10,7 +11,38 @@ import (
 
 	"github.com/blindly/dispatcher/internal/config"
 	"github.com/blindly/dispatcher/internal/db"
+	"golang.org/x/term"
 )
+
+// compactThreshold is the terminal width below which PrintStatus drops
+// the lower-priority "Active" and "Due" columns so the table fits a single
+// line on small screens (e.g. 130-col SSH sessions and laptops).
+const compactThreshold = 140
+
+// terminalWidth returns the stdout terminal width in columns, or 0 if
+// stdout is not a TTY (piped, redirected) or the size cannot be determined.
+// Call sites treat 0 as "unknown" and fall back to the wide layout.
+func terminalWidth() int {
+	w, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 0
+	}
+	return w
+}
+
+// shouldUseCompactLayout reports whether the current stdout is a TTY whose
+// width is below compactThreshold. We only switch layouts when the width is
+// known; non-TTY output keeps the wide layout so logs/redirects stay stable.
+func shouldUseCompactLayout() bool {
+	return isNarrowWidth(terminalWidth())
+}
+
+// isNarrowWidth reports whether the given stdout width should switch to
+// the compact (column-dropped) layout. A non-positive value means we
+// could not measure the width and should keep the wide layout.
+func isNarrowWidth(w int) bool {
+	return w > 0 && w < compactThreshold
+}
 
 var dayAbbr = [7]string{"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
 
@@ -292,11 +324,30 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 		}
 	}
 
+	// On narrow terminals, drop the lower-priority "Active" filter and
+	// "Due" indicator columns so the scheduled-jobs table fits without
+	// wrapping. Adhoc and other tables are already short and untouched.
+	compact := shouldUseCompactLayout()
+	var scheduledHeaderFmt, scheduledRowFmt string
+	var scheduledDivider int
+	if compact {
+		scheduledHeaderFmt = "%-30s  %8s  %-19s  %15s  %-19s  %5s  %5s"
+		scheduledRowFmt = "%-30s  %8s  %-19s  %15s  %-19s  %5d  %5d"
+		scheduledDivider = 117
+	} else {
+		scheduledHeaderFmt = "%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5s  %5s"
+		scheduledRowFmt = "%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5d  %5d"
+		scheduledDivider = 149
+	}
+	scheduledHeaders := []interface{}{"Name", "Interval", "Last Run", "Status", "Next Run", "Runs", "Fails"}
+	if !compact {
+		scheduledHeaders = []interface{}{"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails"}
+	}
+
 	if len(scheduled) > 0 {
 		fmt.Printf("\nScheduled Jobs\n")
-		fmt.Printf("%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5s  %5s\n",
-			"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails")
-		fmt.Println(strings.Repeat("-", 149))
+		fmt.Printf(scheduledHeaderFmt+"\n", scheduledHeaders...)
+		fmt.Println(strings.Repeat("-", scheduledDivider))
 
 		for _, r := range scheduled {
 			job := jobs[r.name]
@@ -314,6 +365,10 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 			} else if r.status.Valid {
 				st = r.status.String
 			}
+			if compact {
+				fmt.Printf(scheduledRowFmt+"\n", r.name, interval, lr, st, nr, r.runCount, r.failCount)
+				continue
+			}
 			isDue := ""
 			if !job.Paused && r.nextRun.Valid && r.nextRun.String <= now.Format(time.RFC3339) {
 				isDue = "YES"
@@ -324,8 +379,7 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 					isDue = ""
 				}
 			}
-			fmt.Printf("%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5d  %5d\n",
-				r.name, interval, active, lr, st, nr, isDue, r.runCount, r.failCount)
+			fmt.Printf(scheduledRowFmt+"\n", r.name, interval, active, lr, st, nr, isDue, r.runCount, r.failCount)
 		}
 	}
 
