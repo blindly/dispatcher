@@ -3,7 +3,6 @@ package display
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -11,38 +10,7 @@ import (
 
 	"github.com/blindly/dispatcher/internal/config"
 	"github.com/blindly/dispatcher/internal/db"
-	"golang.org/x/term"
 )
-
-// compactThreshold is the terminal width below which PrintStatus drops
-// the lower-priority "Active" and "Due" columns so the table fits a single
-// line on small screens (e.g. 130-col SSH sessions and laptops).
-const compactThreshold = 140
-
-// terminalWidth returns the stdout terminal width in columns, or 0 if
-// stdout is not a TTY (piped, redirected) or the size cannot be determined.
-// Call sites treat 0 as "unknown" and fall back to the wide layout.
-func terminalWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		return 0
-	}
-	return w
-}
-
-// shouldUseCompactLayout reports whether the current stdout is a TTY whose
-// width is below compactThreshold. We only switch layouts when the width is
-// known; non-TTY output keeps the wide layout so logs/redirects stay stable.
-func shouldUseCompactLayout() bool {
-	return isNarrowWidth(terminalWidth())
-}
-
-// isNarrowWidth reports whether the given stdout width should switch to
-// the compact (column-dropped) layout. A non-positive value means we
-// could not measure the width and should keep the wide layout.
-func isNarrowWidth(w int) bool {
-	return w > 0 && w < compactThreshold
-}
 
 var dayAbbr = [7]string{"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
 
@@ -281,21 +249,6 @@ type jobRow struct {
 	forceNext    int
 }
 
-func formatRunning(runningSince sql.NullString, now time.Time) string {
-	if !runningSince.Valid {
-		return ""
-	}
-	t, err := time.Parse(time.RFC3339, runningSince.String)
-	if err != nil {
-		return "RUNNING"
-	}
-	elapsed := now.Sub(t)
-	if elapsed < time.Minute {
-		return fmt.Sprintf("RUNNING (%ds)", int(elapsed.Seconds()))
-	}
-	return fmt.Sprintf("RUNNING (%dm)", int(elapsed.Minutes()))
-}
-
 func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, showAll bool) {
 	now := db.NowUTC()
 
@@ -324,91 +277,128 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 		}
 	}
 
-	// On narrow terminals, drop the lower-priority "Active" filter and
-	// "Due" indicator columns so the scheduled-jobs table fits without
-	// wrapping. Adhoc and other tables are already short and untouched.
-	compact := shouldUseCompactLayout()
-	var scheduledHeaderFmt, scheduledRowFmt string
-	var scheduledDivider int
-	if compact {
-		scheduledHeaderFmt = "%-30s  %8s  %-19s  %15s  %-19s  %5s  %5s"
-		scheduledRowFmt = "%-30s  %8s  %-19s  %15s  %-19s  %5d  %5d"
-		scheduledDivider = 117
-	} else {
-		scheduledHeaderFmt = "%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5s  %5s"
-		scheduledRowFmt = "%-30s  %8s  %14s  %-19s  %15s  %-19s  %4s  %5d  %5d"
-		scheduledDivider = 149
-	}
-	scheduledHeaders := []interface{}{"Name", "Interval", "Last Run", "Status", "Next Run", "Runs", "Fails"}
-	if !compact {
-		scheduledHeaders = []interface{}{"Name", "Interval", "Active", "Last Run", "Status", "Next Run", "Due", "Runs", "Fails"}
-	}
-
 	if len(scheduled) > 0 {
-		fmt.Printf("\nScheduled Jobs\n")
-		fmt.Printf(scheduledHeaderFmt+"\n", scheduledHeaders...)
-		fmt.Println(strings.Repeat("-", scheduledDivider))
-
-		for _, r := range scheduled {
-			job := jobs[r.name]
-			interval := FormatInterval(job.IntervalSeconds)
-			lr := "-"
-			if r.lastRun.Valid {
-				lr = FormatDt(r.lastRun.String)
-			}
-			nr := FormatDt(r.nextRun.String)
-			st := "-"
-			if job.Paused {
-				st = "paused"
-			} else if running := formatRunning(r.runningSince, now); running != "" {
-				st = running
-			} else if r.status.Valid {
-				st = r.status.String
-			}
-			if compact {
-				fmt.Printf(scheduledRowFmt+"\n", r.name, interval, lr, st, nr, r.runCount, r.failCount)
-				continue
-			}
-			isDue := ""
-			if !job.Paused && r.nextRun.Valid && r.nextRun.String <= now.Format(time.RFC3339) {
-				isDue = "YES"
-			}
-			active := formatActive(job.ActiveDays, job.ActiveHours)
-			if r.forceNext == 0 {
-				if !db.IsInActiveHours(job.ActiveHours, tzName) || !db.IsOnActiveDay(job.ActiveDays, tzName) {
-					isDue = ""
-				}
-			}
-			fmt.Printf(scheduledRowFmt+"\n", r.name, interval, active, lr, st, nr, isDue, r.runCount, r.failCount)
-		}
+		fmt.Println("\nScheduled Jobs")
+		printJobCards(scheduled, jobs, now, false)
 	}
-
 	if len(adhoc) > 0 {
-		fmt.Printf("\nAdhoc Jobs\n")
-		fmt.Printf("%-30s  %-19s  %15s  %5s  %5s\n",
-			"Name", "Last Run", "Status", "Runs", "Fails")
-		fmt.Println(strings.Repeat("-", 85))
-
-		for _, r := range adhoc {
-			lr := "-"
-			if r.lastRun.Valid {
-				lr = FormatDt(r.lastRun.String)
-			}
-			st := "-"
-			if running := formatRunning(r.runningSince, now); running != "" {
-				st = running
-			} else if r.status.Valid {
-				st = r.status.String
-			}
-			fmt.Printf("%-30s  %-19s  %15s  %5d  %5d\n",
-				r.name, lr, st, r.runCount, r.failCount)
-		}
+		fmt.Println("\nAdhoc Jobs")
+		printJobCards(adhoc, jobs, now, true)
 	}
-
 	if len(scheduled) == 0 && len(adhoc) == 0 {
 		fmt.Println("\nNo jobs configured.")
 	}
 	fmt.Println()
+}
+
+// cardMaxName is the upper bound for the left-aligned name column in the
+// card layout. Names longer than this are truncated with an ellipsis so
+// a single long job name doesn't make every card wrap.
+const cardMaxName = 28
+
+// printJobCards renders each jobRow as a two-line card:
+//
+//	<name padded>  <interval>
+//	  <status>    last <dt>    next <dt>    <n> runs / <n> fails
+//
+// For adhoc jobs the second line drops the "next" field. Names wider
+// than cardMaxName are truncated; the wide terminal layout is gone.
+func printJobCards(rows []jobRow, jobs map[string]*config.JobConfig, now time.Time, adhoc bool) {
+	nameWidth := 0
+	for _, r := range rows {
+		if w := len(r.name); w > nameWidth {
+			nameWidth = w
+		}
+	}
+	if nameWidth > cardMaxName {
+		nameWidth = cardMaxName
+	}
+
+	for _, r := range rows {
+		job := jobs[r.name]
+		displayName := r.name
+		if len(displayName) > cardMaxName {
+			displayName = displayName[:cardMaxName-1] + "…"
+		}
+
+		interval := "-"
+		if !adhoc {
+			interval = FormatInterval(job.IntervalSeconds)
+		}
+
+		status := shortStatus(r, job, now)
+
+		last := "-"
+		if r.lastRun.Valid {
+			last = formatTimeShort(r.lastRun.String, now)
+		}
+		next := "-"
+		if !adhoc && r.nextRun.Valid {
+			next = formatTimeShort(r.nextRun.String, now)
+		}
+
+		fmt.Printf("%-*s  %s\n", nameWidth, displayName, interval)
+		if adhoc {
+			fmt.Printf("  %-7s  last %s                       %d runs / %d fails\n",
+				status, last, r.runCount, r.failCount)
+		} else {
+			fmt.Printf("  %-7s  last %s   next %s   %d runs / %d fails\n",
+				status, last, next, r.runCount, r.failCount)
+		}
+	}
+}
+
+// shortStatus maps a jobRow + config into a compact human token for the
+// card second line. "running" includes elapsed duration when available.
+func shortStatus(r jobRow, job *config.JobConfig, now time.Time) string {
+	if job.Paused {
+		return "paused"
+	}
+	if r.runningSince.Valid {
+		t, err := time.Parse(time.RFC3339, r.runningSince.String)
+		if err != nil {
+			return "running"
+		}
+		elapsed := now.Sub(t)
+		if elapsed < time.Minute {
+			return fmt.Sprintf("running %ds", int(elapsed.Seconds()))
+		}
+		return fmt.Sprintf("running %dm", int(elapsed.Minutes()))
+	}
+	if r.status.Valid {
+		switch {
+		case strings.HasPrefix(r.status.String, "fail"):
+			return "failed"
+		case r.status.String == "interrupted":
+			return "interrupt"
+		case strings.HasPrefix(r.status.String, "pass"):
+			return "ok"
+		}
+	}
+	return "-"
+}
+
+// formatTimeShort collapses today-only timestamps down to HH:MM and uses
+// MM-DD HH:MM for older dates. Reduces card width and is easier to scan
+// than full datetime when most jobs run on the same calendar day.
+func formatTimeShort(iso string, now time.Time) string {
+	if iso == "" {
+		return "-"
+	}
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		if len(iso) >= 16 {
+			return iso[:16]
+		}
+		return iso
+	}
+	if displayLoc != nil {
+		t = t.In(displayLoc)
+	}
+	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		return t.Format("15:04")
+	}
+	return t.Format("01-02 15:04")
 }
 
 // NextRunEntry holds computed next-run info for display.

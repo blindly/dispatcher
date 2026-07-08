@@ -1,6 +1,7 @@
 package display
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -125,25 +126,89 @@ func TestPrintQuickStatus(t *testing.T) {
 	PrintQuickStatus(conn, jobs, "America/New_York", t.TempDir(), false, "cron", "disabled")
 }
 
-func TestIsNarrowWidth(t *testing.T) {
-	tests := []struct {
-		name string
-		w    int
-		want bool
-	}{
-		{"unknown width (non-TTY) keeps wide layout", 0, false},
-		{"negative width keeps wide layout", -1, false},
-		{"exactly threshold keeps wide layout", compactThreshold, false},
-		{"one below threshold triggers compact", compactThreshold - 1, true},
-		{"typical 132-col screen triggers compact", 132, true},
-		{"80-col VTY triggers compact", 80, true},
-		{"typical 160-col screen keeps wide layout", 160, false},
+func TestShortStatus(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+
+	paused := &config.JobConfig{Name: "x", Paused: true, IntervalSeconds: 300}
+	if got := shortStatus(jobRow{}, paused, now); got != "paused" {
+		t.Errorf("paused = %q", got)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isNarrowWidth(tt.w); got != tt.want {
-				t.Errorf("isNarrowWidth(%d) = %v, want %v", tt.w, got, tt.want)
-			}
-		})
+
+	runningRecent := jobRow{runningSince: sql.NullString{String: now.Add(-30 * time.Second).Format(time.RFC3339), Valid: true}}
+	job := &config.JobConfig{Name: "x", IntervalSeconds: 300}
+	if got := shortStatus(runningRecent, job, now); got != "running 30s" {
+		t.Errorf("running recent = %q", got)
 	}
+
+	runningLong := jobRow{runningSince: sql.NullString{String: now.Add(-5 * time.Minute).Format(time.RFC3339), Valid: true}}
+	if got := shortStatus(runningLong, job, now); got != "running 5m" {
+		t.Errorf("running long = %q", got)
+	}
+
+	failed := jobRow{status: sql.NullString{String: "failed: exit 1", Valid: true}}
+	if got := shortStatus(failed, job, now); got != "failed" {
+		t.Errorf("failed = %q", got)
+	}
+
+	passed := jobRow{status: sql.NullString{String: "passed in 12s", Valid: true}}
+	if got := shortStatus(passed, job, now); got != "ok" {
+		t.Errorf("passed = %q", got)
+	}
+
+	inted := jobRow{status: sql.NullString{String: "interrupted", Valid: true}}
+	if got := shortStatus(inted, job, now); got != "interrupt" {
+		t.Errorf("interrupted = %q", got)
+	}
+
+	empty := jobRow{}
+	if got := shortStatus(empty, job, now); got != "-" {
+		t.Errorf("empty = %q", got)
+	}
+}
+
+func TestFormatTimeShort(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+
+	if got := formatTimeShort("", now); got != "-" {
+		t.Errorf("empty = %q", got)
+	}
+
+	today := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	if got := formatTimeShort(today, now); got != "10:00" {
+		t.Errorf("today = %q", got)
+	}
+
+	oldDays := now.AddDate(0, 0, -3).Format(time.RFC3339)
+	got := formatTimeShort(oldDays, now)
+	if len(got) != 11 || got[2] != '-' {
+		t.Errorf("older date should be MM-DD HH:MM, got %q", got)
+	}
+}
+
+func TestPrintStatus_NoJobs(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	PrintStatus(conn, map[string]*config.JobConfig{}, "UTC", false)
+	// Expect: "\nNo jobs configured.\n\n"
+}
+
+func TestPrintStatus_Scheduled(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	jobs := map[string]*config.JobConfig{
+		"backup": {Name: "backup", Commands: []string{"echo"}, IntervalSeconds: 86400},
+	}
+	db.EnsureJobs(conn, jobs)
+
+	PrintStatus(conn, jobs, "UTC", false)
 }
