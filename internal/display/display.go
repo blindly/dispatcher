@@ -279,11 +279,11 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 
 	if len(scheduled) > 0 {
 		fmt.Println("\nScheduled Jobs")
-		printJobCards(scheduled, jobs, now, false)
+		printJobTable(scheduled, jobs, now, false)
 	}
 	if len(adhoc) > 0 {
 		fmt.Println("\nAdhoc Jobs")
-		printJobCards(adhoc, jobs, now, true)
+		printJobTable(adhoc, jobs, now, true)
 	}
 	if len(scheduled) == 0 && len(adhoc) == 0 {
 		fmt.Println("\nNo jobs configured.")
@@ -291,37 +291,47 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 	fmt.Println()
 }
 
-// cardMaxName is the upper bound for the left-aligned name column in the
-// card layout. Names longer than this are truncated with an ellipsis so
-// a single long job name doesn't make every card wrap.
-const cardMaxName = 28
+// tableMaxName caps the name column so a single long job name doesn't
+// push the whole table past ~80 chars. Names longer than this are
+// truncated with an ellipsis (e.g. "very-long-job-na…").
+const tableMaxName = 28
 
-// printJobCards renders each jobRow as a two-line card:
+// tableRowFmt is used for both the header row and every data row, so the
+// columns align automatically. Layout:
 //
-//	<name padded>  <interval>
-//	  <status>    last <dt>    next <dt>    <n> runs / <n> fails
+//	NAME  INT  LAST  NEXT  STATUS  RUN/FAIL
 //
-// For adhoc jobs the second line drops the "next" field. Names wider
-// than cardMaxName are truncated; the wide terminal layout is gone.
-func printJobCards(rows []jobRow, jobs map[string]*config.JobConfig, now time.Time, adhoc bool) {
+// Total width is roughly 80 chars when the longest name is <= 25 chars.
+const tableRowFmt = "%-*s  %4s  %-11s %-11s %-11s %8s"
+
+// printJobTable renders one job per row in a single-line table — the
+// `ls -l` / `docker ps` aesthetic. Adhoc jobs drop the interval column
+// (printed as "adhoc") so the layout stays identical between sections.
+func printJobTable(rows []jobRow, jobs map[string]*config.JobConfig, now time.Time, adhoc bool) {
 	nameWidth := 0
 	for _, r := range rows {
 		if w := len(r.name); w > nameWidth {
 			nameWidth = w
 		}
 	}
-	if nameWidth > cardMaxName {
-		nameWidth = cardMaxName
+	if nameWidth > tableMaxName {
+		nameWidth = tableMaxName
+	}
+
+	if !adhoc {
+		fmt.Printf(tableRowFmt+"\n", nameWidth, "NAME", "INT", "LAST", "NEXT", "STATUS", "RUN/FAIL")
+	} else {
+		fmt.Printf(tableRowFmt+"\n", nameWidth, "NAME", "TYPE", "LAST", "", "STATUS", "RUN/FAIL")
 	}
 
 	for _, r := range rows {
 		job := jobs[r.name]
 		displayName := r.name
-		if len(displayName) > cardMaxName {
-			displayName = displayName[:cardMaxName-1] + "…"
+		if len(displayName) > nameWidth {
+			displayName = displayName[:nameWidth-1] + "…"
 		}
 
-		interval := "-"
+		interval := "adhoc"
 		if !adhoc {
 			interval = FormatInterval(job.IntervalSeconds)
 		}
@@ -337,14 +347,9 @@ func printJobCards(rows []jobRow, jobs map[string]*config.JobConfig, now time.Ti
 			next = formatTimeShort(r.nextRun.String, now)
 		}
 
-		fmt.Printf("%-*s  %s\n", nameWidth, displayName, interval)
-		if adhoc {
-			fmt.Printf("  %-7s  last %s                       %d runs / %d fails\n",
-				status, last, r.runCount, r.failCount)
-		} else {
-			fmt.Printf("  %-7s  last %s   next %s   %d runs / %d fails\n",
-				status, last, next, r.runCount, r.failCount)
-		}
+		fmt.Printf(tableRowFmt+"\n",
+			nameWidth, displayName, interval, last, next, status,
+			fmt.Sprintf("%d/%d", r.runCount, r.failCount))
 	}
 }
 
