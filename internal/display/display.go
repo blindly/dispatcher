@@ -3,10 +3,13 @@ package display
 import (
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/blindly/dispatcher/internal/config"
 	"github.com/blindly/dispatcher/internal/db"
@@ -296,60 +299,106 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 // truncated with an ellipsis (e.g. "very-long-job-na…").
 const tableMaxName = 28
 
-// tableRowFmt is used for both the header row and every data row, so the
-// columns align automatically. Layout:
-//
-//	NAME  INT  LAST  NEXT  STATUS  RUN/FAIL
-//
-// Total width is roughly 80 chars when the longest name is <= 25 chars.
-const tableRowFmt = "%-*s  %4s  %-11s %-11s %-11s %8s"
+// truncateRunes shortens s to at most max characters, replacing the last
+// one with an ellipsis. Counting runes rather than bytes keeps non-ASCII
+// names from being cut mid-character.
+func truncateRunes(s string, max int) string {
+	rs := []rune(s)
+	if len(rs) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(rs[:max])
+	}
+	return string(rs[:max-1]) + "…"
+}
+
+func padRight(s string, width int) string {
+	if n := utf8.RuneCountInString(s); n < width {
+		return s + strings.Repeat(" ", width-n)
+	}
+	return s
+}
+
+func padLeft(s string, width int) string {
+	if n := utf8.RuneCountInString(s); n < width {
+		return strings.Repeat(" ", width-n) + s
+	}
+	return s
+}
 
 // printJobTable renders one job per row in a single-line table — the
-// `ls -l` / `docker ps` aesthetic. Adhoc jobs drop the interval column
-// (printed as "adhoc") so the layout stays identical between sections.
+// `ls -l` / `docker ps` aesthetic. Adhoc jobs replace the interval with
+// "adhoc" and drop the next-run column, which is meaningless for them.
 func printJobTable(rows []jobRow, jobs map[string]*config.JobConfig, now time.Time, adhoc bool) {
-	nameWidth := 0
-	for _, r := range rows {
-		if w := len(r.name); w > nameWidth {
-			nameWidth = w
-		}
-	}
-	if nameWidth > tableMaxName {
-		nameWidth = tableMaxName
+	fprintJobTable(os.Stdout, rows, jobs, now, adhoc)
+}
+
+func fprintJobTable(w io.Writer, rows []jobRow, jobs map[string]*config.JobConfig, now time.Time, adhoc bool) {
+	type cells struct {
+		name, interval, last, next, status, counts string
 	}
 
-	if !adhoc {
-		fmt.Printf(tableRowFmt+"\n", nameWidth, "NAME", "INT", "LAST", "NEXT", "STATUS", "RUN/FAIL")
-	} else {
-		fmt.Printf(tableRowFmt+"\n", nameWidth, "NAME", "TYPE", "LAST", "", "STATUS", "RUN/FAIL")
+	intervalHeader := "INT"
+	if adhoc {
+		intervalHeader = "TYPE"
 	}
+	head := cells{"NAME", intervalHeader, "LAST", "NEXT", "STATUS", "RUN/FAIL"}
 
+	body := make([]cells, 0, len(rows))
 	for _, r := range rows {
 		job := jobs[r.name]
-		displayName := r.name
-		if len(displayName) > nameWidth {
-			displayName = displayName[:nameWidth-1] + "…"
+		c := cells{
+			name:     truncateRunes(r.name, tableMaxName),
+			interval: "adhoc",
+			last:     "-",
+			next:     "-",
+			status:   shortStatus(r, job, now),
+			counts:   fmt.Sprintf("%d/%d", r.runCount, r.failCount),
 		}
-
-		interval := "adhoc"
 		if !adhoc {
-			interval = FormatInterval(job.IntervalSeconds)
+			c.interval = FormatInterval(job.IntervalSeconds)
 		}
-
-		status := shortStatus(r, job, now)
-
-		last := "-"
 		if r.lastRun.Valid {
-			last = formatTimeShort(r.lastRun.String, now)
+			c.last = formatTimeShort(r.lastRun.String, now)
 		}
-		next := "-"
 		if !adhoc && r.nextRun.Valid {
-			next = formatTimeShort(r.nextRun.String, now)
+			c.next = formatTimeShort(r.nextRun.String, now)
 		}
+		body = append(body, c)
+	}
 
-		fmt.Printf(tableRowFmt+"\n",
-			nameWidth, displayName, interval, last, next, status,
-			fmt.Sprintf("%d/%d", r.runCount, r.failCount))
+	// Widths come from the header and the data so no cell ever overflows
+	// its column: long names, "running 3d", and six-digit run counts all
+	// keep the table aligned.
+	width := func(pick func(cells) string) int {
+		max := utf8.RuneCountInString(pick(head))
+		for _, c := range body {
+			if n := utf8.RuneCountInString(pick(c)); n > max {
+				max = n
+			}
+		}
+		return max
+	}
+	nameW := width(func(c cells) string { return c.name })
+	intervalW := width(func(c cells) string { return c.interval })
+	lastW := width(func(c cells) string { return c.last })
+	nextW := width(func(c cells) string { return c.next })
+	statusW := width(func(c cells) string { return c.status })
+	countsW := width(func(c cells) string { return c.counts })
+
+	line := func(c cells) {
+		parts := []string{padRight(c.name, nameW), padLeft(c.interval, intervalW), padRight(c.last, lastW)}
+		if !adhoc {
+			parts = append(parts, padRight(c.next, nextW))
+		}
+		parts = append(parts, padRight(c.status, statusW), padLeft(c.counts, countsW))
+		fmt.Fprintln(w, strings.TrimRight(strings.Join(parts, "  "), " "))
+	}
+
+	line(head)
+	for _, c := range body {
+		line(c)
 	}
 }
 
@@ -365,10 +414,16 @@ func shortStatus(r jobRow, job *config.JobConfig, now time.Time) string {
 			return "running"
 		}
 		elapsed := now.Sub(t)
-		if elapsed < time.Minute {
+		switch {
+		case elapsed < time.Minute:
 			return fmt.Sprintf("running %ds", int(elapsed.Seconds()))
+		case elapsed < time.Hour:
+			return fmt.Sprintf("running %dm", int(elapsed.Minutes()))
+		case elapsed < 24*time.Hour:
+			return fmt.Sprintf("running %dh", int(elapsed.Hours()))
+		default:
+			return fmt.Sprintf("running %dd", int(elapsed.Hours()/24))
 		}
-		return fmt.Sprintf("running %dm", int(elapsed.Minutes()))
 	}
 	if r.status.Valid {
 		switch {

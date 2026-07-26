@@ -256,6 +256,25 @@ func main() {
 		return
 	}
 
+	// update needs neither a config, a DB, nor the lock: a globally
+	// installed binary must be able to update itself from any directory,
+	// and from a state where the config is missing or unparseable.
+	if cmd == "update" {
+		if !updateAllowed(configPath) {
+			fmt.Fprintf(os.Stderr, "Update disabled by 'update: false' in %s\n", configPath)
+			os.Exit(1)
+		}
+		targetVersion := ""
+		if len(args) > 0 {
+			targetVersion = args[0]
+		}
+		if err := selfUpdate(targetVersion); err != nil {
+			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "Config not found: %s\n", configPath)
 		os.Exit(1)
@@ -285,23 +304,6 @@ func main() {
 		configDir, _ = os.Getwd()
 	} else {
 		configDir, _ = filepath.Abs(configDir)
-	}
-
-	// update doesn't need DB or lock
-	if cmd == "update" {
-		if !cfg.AllowUpdate {
-			fmt.Println("Update disabled (air-gapped environment)")
-			return
-		}
-		targetVersion := ""
-		if len(args) > 0 {
-			targetVersion = args[0]
-		}
-		if err := selfUpdate(targetVersion); err != nil {
-			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
-			os.Exit(1)
-		}
-		return
 	}
 
 	// enable/disable don't need DB
@@ -923,6 +925,20 @@ func enableCron(schedule string, projectDir string) {
 	case cronUpdated:
 		fmt.Printf("Cron updated: %s\n", cronLine)
 	}
+}
+
+// updateAllowed reports whether self-update is permitted. Only a config
+// that both exists and parses can opt out via 'update: false'; anything
+// else leaves updates enabled so a broken config can be fixed by updating.
+func updateAllowed(configPath string) bool {
+	if _, err := os.Stat(configPath); err != nil {
+		return true
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return true
+	}
+	return cfg.AllowUpdate
 }
 
 func selfUpdate(targetVersion string) error {
