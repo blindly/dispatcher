@@ -73,20 +73,29 @@ func detectConfig() string {
 // ensureDispatcherDir creates the .dispatcher directory and migrates old files from the project root.
 func ensureDispatcherDir(configDir string) string {
 	dispDir := filepath.Join(configDir, ".dispatcher")
-	os.MkdirAll(dispDir, 0755)
+	if err := os.MkdirAll(dispDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create %s: %v\n", dispDir, err)
+		os.Exit(1)
+	}
 
 	// Migrate old data.db (and WAL/SHM files) from project root into .dispatcher/
 	oldDb := filepath.Join(configDir, "data.db")
 	newDb := filepath.Join(dispDir, "data.db")
 	if _, err := os.Stat(oldDb); err == nil {
 		if _, err := os.Stat(newDb); os.IsNotExist(err) {
-			if err := os.Rename(oldDb, newDb); err == nil {
-				fmt.Println("Migrated data.db → .dispatcher/data.db")
+			// A failed migration silently starts the dispatcher on an empty
+			// database, so surface it instead of continuing quietly.
+			if err := os.Rename(oldDb, newDb); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to migrate data.db → .dispatcher/data.db: %v\n", err)
+				os.Exit(1)
 			}
+			fmt.Println("Migrated data.db → .dispatcher/data.db")
 			for _, ext := range []string{"-wal", "-shm"} {
 				old := filepath.Join(configDir, "data.db"+ext)
 				if _, err := os.Stat(old); err == nil {
-					os.Rename(old, filepath.Join(dispDir, "data.db"+ext))
+					if err := os.Rename(old, filepath.Join(dispDir, "data.db"+ext)); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not migrate data.db%s: %v\n", ext, err)
+					}
 				}
 			}
 		}
@@ -97,7 +106,9 @@ func ensureDispatcherDir(configDir string) string {
 	newLogs := filepath.Join(dispDir, "logs")
 	if info, err := os.Stat(oldLogs); err == nil && info.IsDir() {
 		if _, err := os.Stat(newLogs); os.IsNotExist(err) {
-			if err := os.Rename(oldLogs, newLogs); err == nil {
+			if err := os.Rename(oldLogs, newLogs); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not migrate logs/ → .dispatcher/logs/: %v\n", err)
+			} else {
 				fmt.Println("Migrated logs/ → .dispatcher/logs/")
 			}
 		}
@@ -105,8 +116,8 @@ func ensureDispatcherDir(configDir string) string {
 
 	// Clean up old lock file
 	oldLock := filepath.Join(configDir, ".dispatch.lock")
-	if _, err := os.Stat(oldLock); err == nil {
-		os.Remove(oldLock)
+	if err := os.Remove(oldLock); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", oldLock, err)
 	}
 
 	// Migrate crontab entry if needed
@@ -265,7 +276,7 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		if notifyCfg := config.ExtractNotifySettings(configPath); notifyCfg != nil {
-			notify.SendLiveNotification(
+			if nerr := notify.SendLiveNotification(
 				fmt.Sprintf("Config error in `%s`: %v", configPath, err),
 				"",
 				notify.NotifyConfig{
@@ -275,16 +286,28 @@ func main() {
 					NtfyToken:      notifyCfg.Ntfy.Token,
 					NtfyPriority:   notifyCfg.Ntfy.Priority,
 				},
-			)
+			); nerr != nil {
+				fmt.Fprintf(os.Stderr, "Could not notify about the config error: %v\n", nerr)
+			}
 		}
 		os.Exit(1)
 	}
 
 	configDir := filepath.Dir(configPath)
 	if configDir == "" || configDir == "." {
-		configDir, _ = os.Getwd()
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error resolving working directory: %v\n", err)
+			os.Exit(1)
+		}
+		configDir = cwd
 	} else {
-		configDir, _ = filepath.Abs(configDir)
+		abs, err := filepath.Abs(configDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error resolving config directory %s: %v\n", configDir, err)
+			os.Exit(1)
+		}
+		configDir = abs
 	}
 
 	// update doesn't need DB or lock
@@ -407,7 +430,10 @@ func main() {
 			}
 		}
 		expiresAt := time.Now().UTC().Add(duration)
-		writePauseFile(dispDir, expiresAt, reason)
+		if err := writePauseFile(dispDir, expiresAt, reason); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to pause: %v\n", err)
+			os.Exit(1)
+		}
 		durationStr := FormatDuration(duration)
 		msg := fmt.Sprintf("Dispatcher paused for %s (until %s)", durationStr, expiresAt.Local().Format("15:04"))
 		if reason != "" {
@@ -423,7 +449,10 @@ func main() {
 			fmt.Println("Dispatcher is not paused")
 			return
 		}
-		removePauseFile(dispDir)
+		if err := removePauseFile(dispDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to resume: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Println("Dispatcher resumed")
 		return
 	}
@@ -500,9 +529,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: closing database: %v\n", err)
+		}
+	}()
 
-	db.EnsureJobs(conn, cfg.Jobs)
+	if err := db.EnsureJobs(conn, cfg.Jobs); err != nil {
+		fmt.Fprintf(os.Stderr, "Error registering jobs: %v\n", err)
+		os.Exit(1)
+	}
 	display.SetTimezone(cfg.Timezone)
 	runner.SetLogDir(dispDir)
 
@@ -531,17 +567,17 @@ func main() {
 			}
 		}
 		display.PrintPauseBanner(pauseMsg)
-		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone, showAll)
+		exitOnError(display.PrintStatus(conn, cfg.Jobs, cfg.Timezone, showAll))
 		return
 	}
 
 	if cmd == "next" {
-		display.PrintNextRuns(conn, cfg.Jobs, cfg.Timezone)
+		exitOnError(display.PrintNextRuns(conn, cfg.Jobs, cfg.Timezone))
 		return
 	}
 
 	if cmd == "analytics" {
-		display.PrintAnalytics(conn)
+		exitOnError(display.PrintAnalytics(conn))
 		return
 	}
 
@@ -554,7 +590,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
 			os.Exit(1)
 		}
-		display.PrintHistory(conn, args[0], 20)
+		exitOnError(display.PrintHistory(conn, args[0], 20))
 		return
 	}
 
@@ -568,12 +604,12 @@ func main() {
 		display.PrintPauseBanner(pauseMsg)
 		sched := cfg.EffectiveScheduler()
 		schedStatus := resolveSchedulerStatus(sched, configDir)
-		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll, sched, schedStatus)
+		exitOnError(display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll, sched, schedStatus))
 		return
 	}
 
 	if cmd == "info" {
-		printInfo(cfg, configPath, configDir, dispDir, conn)
+		exitOnError(printInfo(cfg, configPath, configDir, dispDir, conn))
 		return
 	}
 
@@ -587,10 +623,19 @@ func main() {
 		var reset []string
 		for rows.Next() {
 			var name string
-			rows.Scan(&name)
+			if err := rows.Scan(&name); err != nil {
+				rows.Close()
+				fmt.Fprintf(os.Stderr, "Error reading failed jobs: %v\n", err)
+				os.Exit(1)
+			}
 			if _, ok := cfg.Jobs[name]; ok {
 				reset = append(reset, name)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			fmt.Fprintf(os.Stderr, "Error reading failed jobs: %v\n", err)
+			os.Exit(1)
 		}
 		rows.Close()
 		if len(reset) == 0 {
@@ -598,7 +643,10 @@ func main() {
 			return
 		}
 		for _, name := range reset {
-			conn.Exec("UPDATE cron_jobs SET next_run_at = ?, last_status = NULL, force_next = 1 WHERE name = ?", now, name)
+			if _, err := conn.Exec("UPDATE cron_jobs SET next_run_at = ?, last_status = NULL, force_next = 1 WHERE name = ?", now, name); err != nil {
+				fmt.Fprintf(os.Stderr, "Error resetting %s: %v\n", name, err)
+				os.Exit(1)
+			}
 		}
 		fmt.Printf("Reset %d failed jobs: %s\n", len(reset), strings.Join(reset, ", "))
 		return
@@ -613,8 +661,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
 			os.Exit(1)
 		}
-		conn.Exec("UPDATE cron_jobs SET next_run_at = ? WHERE name = ?",
-			db.NowUTC().Format(time.RFC3339), args[0])
+		if _, err := conn.Exec("UPDATE cron_jobs SET next_run_at = ? WHERE name = ?",
+			db.NowUTC().Format(time.RFC3339), args[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error resetting %s: %v\n", args[0], err)
+			os.Exit(1)
+		}
 		fmt.Printf("Reset %s — will run on next dispatch\n", args[0])
 		return
 	}
@@ -650,7 +701,10 @@ func main() {
 	defer releaseLock(lockFd, dispDir)
 
 	// We hold the lock — any non-adhoc running_since is stale from a crashed run
-	db.ClearStaleRunning(conn, cfg.Jobs)
+	if err := db.ClearStaleRunning(conn, cfg.Jobs); err != nil {
+		fmt.Fprintf(os.Stderr, "Error clearing stale job state: %v\n", err)
+		os.Exit(1)
+	}
 
 	switch cmd {
 	case "run":
@@ -660,7 +714,7 @@ func main() {
 		extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
 		rc, elapsed, output := runner.RunJobInteractive(conn, job, extraArgs, extraEnv)
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify}}
-		notify.SendAll(results, notifyCfg)
+		reportNotifyErrors(notify.SendAll(results, notifyCfg))
 		if rc != 0 {
 			os.Exit(1)
 		}
@@ -675,7 +729,7 @@ func main() {
 			rc, elapsed, output := runner.RunJobInteractive(conn, job, nil, jobEnv)
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 		}
-		notify.SendAll(results, notifyCfg)
+		reportNotifyErrors(notify.SendAll(results, notifyCfg))
 		for _, r := range results {
 			if r.ExitCode != 0 {
 				os.Exit(1)
@@ -716,10 +770,34 @@ func main() {
 	}
 }
 
-func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.NotifyConfig) {
-	db.SetMeta(conn, "last_dispatch_at", db.NowUTC().Format(time.RFC3339))
+// exitOnError reports err and exits non-zero, so a read command that failed
+// mid-query cannot look like it printed a complete result.
+func exitOnError(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
 
-	due := db.GetDueJobs(conn, cfg.Jobs, cfg.Timezone)
+// reportNotifyErrors surfaces notification delivery failures without failing
+// the dispatch run itself.
+func reportNotifyErrors(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Notification error: %v\n", err)
+	}
+}
+
+func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.NotifyConfig) {
+	if err := db.SetMeta(conn, "last_dispatch_at", db.NowUTC().Format(time.RFC3339)); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+
+	due, err := db.GetDueJobs(conn, cfg.Jobs, cfg.Timezone)
+	if err != nil {
+		// Returning no jobs on a query failure would look like "nothing due".
+		fmt.Fprintf(os.Stderr, "Error determining due jobs: %v\n", err)
+		os.Exit(1)
+	}
 	if len(due) == 0 {
 		fmt.Printf("No jobs due (%d jobs configured)\n", len(cfg.Jobs))
 		return
@@ -764,10 +842,12 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.Notif
 	}
 	fmt.Printf("%s\n  Done: %d ok, %d failed, %.1fs total\n%s\n", sep, passed, failed, totalTime, sep)
 
-	notify.SendAll(results, notifyCfg)
+	reportNotifyErrors(notify.SendAll(results, notifyCfg))
 
 	// Auto-purge old history
-	db.PurgeHistory(conn, cfg.Retention)
+	if _, err := db.PurgeHistory(conn, cfg.Retention); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: auto-purge failed: %v\n", err)
+	}
 }
 
 func showDocs() {
@@ -842,11 +922,19 @@ func watchLogs(configDir string, jobName string, jobs map[string]*config.JobConf
 
 			file, err := os.Open(f)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: cannot open %s: %v\n", f, err)
 				continue
 			}
-			file.Seek(offset, 0)
+			if _, err := file.Seek(offset, io.SeekStart); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: cannot seek %s: %v\n", f, err)
+				file.Close()
+				continue
+			}
 			buf := make([]byte, info.Size()-offset)
-			n, _ := file.Read(buf)
+			n, err := file.Read(buf)
+			if err != nil && err != io.EOF {
+				fmt.Fprintf(os.Stderr, "Warning: cannot read %s: %v\n", f, err)
+			}
 			file.Close()
 
 			if n > 0 {
@@ -900,6 +988,7 @@ func enableCron(schedule string, projectDir string) {
 	}
 	cronLine := fmt.Sprintf("%s cd %s && %s >> .dispatcher/logs/dispatcher.log 2>&1", schedule, projectDir, dispatchPath)
 
+	// A missing crontab is normal here (exit status 1), so only the content matters.
 	out, _ := exec.Command("crontab", "-l").Output()
 	existing := string(out)
 

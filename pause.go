@@ -14,19 +14,33 @@ type PauseInfo struct {
 	PausedAt  string `json:"paused_at"`
 }
 
-func writePauseFile(dir string, expiresAt time.Time, reason string) {
+func writePauseFile(dir string, expiresAt time.Time, reason string) error {
 	info := PauseInfo{
 		ExpiresAt: expiresAt.Format(time.RFC3339),
 		Reason:    reason,
 		PausedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
-	data, _ := json.MarshalIndent(info, "", "  ")
-	os.WriteFile(filepath.Join(dir, "paused"), data, 0644)
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding pause file: %w", err)
+	}
+	path := filepath.Join(dir, "paused")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
 }
 
 func readPauseFile(dir string) *PauseInfo {
-	data, err := os.ReadFile(filepath.Join(dir, "paused"))
+	path := filepath.Join(dir, "paused")
+	data, err := os.ReadFile(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			// The pause file exists but can't be read — stay paused rather
+			// than dispatching jobs the user may have deliberately stopped.
+			fmt.Fprintf(os.Stderr, "Warning: cannot read %s: %v\n", path, err)
+			return &PauseInfo{Reason: "pause file unreadable"}
+		}
 		return nil
 	}
 
@@ -38,8 +52,12 @@ func readPauseFile(dir string) *PauseInfo {
 	return &info
 }
 
-func removePauseFile(dir string) {
-	os.Remove(filepath.Join(dir, "paused"))
+func removePauseFile(dir string) error {
+	path := filepath.Join(dir, "paused")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", path, err)
+	}
+	return nil
 }
 
 func FormatDuration(d time.Duration) string {
@@ -73,7 +91,9 @@ func checkPause(dir string) (paused bool, msg string) {
 	}
 
 	if time.Now().UTC().After(expiresAt) {
-		removePauseFile(dir)
+		if err := removePauseFile(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: pause expired but %v\n", err)
+		}
 		return false, ""
 	}
 

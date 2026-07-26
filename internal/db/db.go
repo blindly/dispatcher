@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/blindly/dispatcher/internal/config"
@@ -40,42 +42,68 @@ const migration2 = `CREATE TABLE IF NOT EXISTS dispatcher_meta (
     value TEXT NOT NULL
 );`
 
+// isDuplicateColumn reports whether err is SQLite's "duplicate column name"
+// error, which an ALTER TABLE migration returns when it has already been applied.
+func isDuplicateColumn(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate column name")
+}
+
+func applyMigration(db *sql.DB, stmt string) error {
+	if _, err := db.Exec(stmt); err != nil && !isDuplicateColumn(err) {
+		return fmt.Errorf("applying migration %q: %w", stmt, err)
+	}
+	return nil
+}
+
 func Open(dbPath string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	db.Exec("PRAGMA journal_mode=WAL")
-	db.Exec("PRAGMA busy_timeout=10000")
+	for _, pragma := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=10000"} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("setting %s: %w", pragma, err)
+		}
+	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("creating schema: %w", err)
 	}
-	// Migration: add running_since column if missing
-	db.Exec(migration1)
-	// Migration: add dispatcher_meta table
-	db.Exec(migration2)
-	// Migration: add force_next column
-	db.Exec(migration3)
+	// Migrations: running_since column, dispatcher_meta table, force_next column
+	for _, m := range []string{migration1, migration2, migration3} {
+		if err := applyMigration(db, m); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	return db, nil
 }
 
-func ClearAllRunning(db *sql.DB) {
-	db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE running_since IS NOT NULL")
+func ClearAllRunning(db *sql.DB) error {
+	if _, err := db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE running_since IS NOT NULL"); err != nil {
+		return fmt.Errorf("clearing running state: %w", err)
+	}
+	return nil
 }
 
-func ClearStaleRunning(db *sql.DB, jobs map[string]*config.JobConfig) {
+func ClearStaleRunning(db *sql.DB, jobs map[string]*config.JobConfig) error {
 	now := NowUTC()
 	for name, job := range jobs {
 		var runningSince sql.NullString
-		db.QueryRow("SELECT running_since FROM cron_jobs WHERE name = ?", name).Scan(&runningSince)
+		err := db.QueryRow("SELECT running_since FROM cron_jobs WHERE name = ?", name).Scan(&runningSince)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("reading running state for %s: %w", name, err)
+		}
 		if !runningSince.Valid {
 			continue
 		}
 
 		started, err := time.Parse(time.RFC3339, runningSince.String)
 		if err != nil {
-			db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ?", name)
+			if err := ClearRunning(db, name); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -89,35 +117,51 @@ func ClearStaleRunning(db *sql.DB, jobs map[string]*config.JobConfig) {
 			// Stale — exceeded timeout, mark as failed
 			fmt.Printf("  STALE %s — was running for %s (timeout %s), marking as failed\n",
 				name, elapsed.Round(time.Second), timeout)
-			db.Exec("UPDATE cron_jobs SET running_since = NULL, last_status = ? WHERE name = ?",
-				"failed:stale", name)
-			db.Exec("INSERT INTO job_runs (name, run_at, status, exit_code, duration_s) VALUES (?, ?, ?, ?, ?)",
-				name, runningSince.String, "failed:stale", -3, elapsed.Seconds())
+			if _, err := db.Exec("UPDATE cron_jobs SET running_since = NULL, last_status = ? WHERE name = ?",
+				"failed:stale", name); err != nil {
+				return fmt.Errorf("marking %s stale: %w", name, err)
+			}
+			if _, err := db.Exec("INSERT INTO job_runs (name, run_at, status, exit_code, duration_s) VALUES (?, ?, ?, ?, ?)",
+				name, runningSince.String, "failed:stale", -3, elapsed.Seconds()); err != nil {
+				return fmt.Errorf("recording stale run for %s: %w", name, err)
+			}
 		} else if !job.Adhoc {
 			// Non-adhoc but within timeout — still stale since we hold the lock
-			db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ?", name)
+			if err := ClearRunning(db, name); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
-func MarkRunning(db *sql.DB, name string) {
+func MarkRunning(db *sql.DB, name string) error {
 	now := NowUTC().Format(time.RFC3339)
-	db.Exec("UPDATE cron_jobs SET running_since = ? WHERE name = ?", now, name)
+	if _, err := db.Exec("UPDATE cron_jobs SET running_since = ? WHERE name = ?", now, name); err != nil {
+		return fmt.Errorf("marking %s running: %w", name, err)
+	}
+	return nil
 }
 
-func ClearRunning(db *sql.DB, name string) {
-	db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ?", name)
+func ClearRunning(db *sql.DB, name string) error {
+	if _, err := db.Exec("UPDATE cron_jobs SET running_since = NULL WHERE name = ?", name); err != nil {
+		return fmt.Errorf("clearing running state for %s: %w", name, err)
+	}
+	return nil
 }
 
 func NowUTC() time.Time {
 	return time.Now().UTC()
 }
 
-func EnsureJobs(db *sql.DB, jobs map[string]*config.JobConfig) {
+func EnsureJobs(db *sql.DB, jobs map[string]*config.JobConfig) error {
 	now := NowUTC().Format(time.RFC3339)
 	for name := range jobs {
-		db.Exec("INSERT OR IGNORE INTO cron_jobs (name, next_run_at) VALUES (?, ?)", name, now)
+		if _, err := db.Exec("INSERT OR IGNORE INTO cron_jobs (name, next_run_at) VALUES (?, ?)", name, now); err != nil {
+			return fmt.Errorf("registering job %s: %w", name, err)
+		}
 	}
+	return nil
 }
 
 func IsInActiveHours(hours *[2]int, tzName string) bool {
@@ -229,7 +273,13 @@ func deriveValidMinutes(anchor int, intervalMin int) []int {
 // constraints are satisfied.
 func ComputeNextRun(job *config.JobConfig, nextRunStr string, tzName string) time.Time {
 	now := NowUTC()
-	loc, _ := time.LoadLocation(tzName)
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		// Config validation rejects unknown timezones; stay defensive here and
+		// fall back to UTC rather than computing against a nil location.
+		fmt.Fprintf(os.Stderr, "Warning: unknown timezone %q, using UTC: %v\n", tzName, err)
+		loc = time.UTC
+	}
 
 	// Parse next_run_at; fall back to now if missing or already past
 	candidate := now
@@ -312,11 +362,11 @@ func IsInActiveHoursAt(hours *[2]int, t time.Time, loc *time.Location) bool {
 	return hour >= start || hour < end
 }
 
-func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {
+func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) ([]string, error) {
 	now := NowUTC().Format(time.RFC3339)
 	rows, err := db.Query("SELECT name, force_next FROM cron_jobs WHERE next_run_at <= ? ORDER BY next_run_at", now)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("querying due jobs: %w", err)
 	}
 	defer rows.Close()
 
@@ -324,7 +374,9 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 	for rows.Next() {
 		var name string
 		var forceNext int
-		rows.Scan(&name, &forceNext)
+		if err := rows.Scan(&name, &forceNext); err != nil {
+			return nil, fmt.Errorf("scanning due jobs: %w", err)
+		}
 		job, ok := jobs[name]
 		if !ok {
 			continue
@@ -337,27 +389,35 @@ func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []
 		}
 		due = append(due, name)
 	}
-	return due
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading due jobs: %w", err)
+	}
+	return due, nil
 }
 
-func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string, atMinute *int) {
+func UpdateAfterRun(db *sql.DB, name string, intervalSeconds int, rc int, elapsed float64, status string, atMinute *int) error {
 	now := NowUTC()
 	nextRun := computeNextAligned(now, intervalSeconds, atMinute).Format(time.RFC3339)
 	failInc := 0
 	if rc != 0 && status != "interrupted" {
 		failInc = 1
 	}
-	db.Exec(
+	if _, err := db.Exec(
 		`UPDATE cron_jobs SET last_run_at = ?, next_run_at = ?, last_status = ?,
 		 last_duration_s = ?, run_count = run_count + 1, fail_count = fail_count + ?,
 		 force_next = 0
 		 WHERE name = ?`,
 		now.Format(time.RFC3339), nextRun, status, elapsed, failInc, name,
-	)
-	db.Exec(
+	); err != nil {
+		return fmt.Errorf("updating state for %s: %w", name, err)
+	}
+	if _, err := db.Exec(
 		`INSERT INTO job_runs (name, run_at, status, exit_code, duration_s) VALUES (?, ?, ?, ?, ?)`,
 		name, now.Format(time.RFC3339), status, rc, elapsed,
-	)
+	); err != nil {
+		return fmt.Errorf("recording run for %s: %w", name, err)
+	}
+	return nil
 }
 
 type JobAnalytics struct {
@@ -396,7 +456,9 @@ func GetAnalytics(db *sql.DB) ([]JobAnalytics, error) {
 	for rows.Next() {
 		var a JobAnalytics
 		var avgDur sql.NullFloat64
-		rows.Scan(&a.Name, &a.TotalRuns, &a.PassCount, &a.FailCount, &avgDur)
+		if err := rows.Scan(&a.Name, &a.TotalRuns, &a.PassCount, &a.FailCount, &avgDur); err != nil {
+			return nil, fmt.Errorf("scanning analytics: %w", err)
+		}
 		if avgDur.Valid {
 			a.AvgDuration = avgDur.Float64
 		}
@@ -405,6 +467,9 @@ func GetAnalytics(db *sql.DB) ([]JobAnalytics, error) {
 		}
 		analytics[a.Name] = &a
 		result = append(result, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading analytics: %w", err)
 	}
 
 	// Get last 7 days stats
@@ -418,14 +483,16 @@ func GetAnalytics(db *sql.DB) ([]JobAnalytics, error) {
 		GROUP BY name
 	`, sevenDaysAgo)
 	if err != nil {
-		return result, nil
+		return nil, fmt.Errorf("querying 7-day analytics: %w", err)
 	}
 	defer rows7d.Close()
 
 	for rows7d.Next() {
 		var name string
 		var total, pass int
-		rows7d.Scan(&name, &total, &pass)
+		if err := rows7d.Scan(&name, &total, &pass); err != nil {
+			return nil, fmt.Errorf("scanning 7-day analytics: %w", err)
+		}
 		if a, ok := analytics[name]; ok {
 			a.Last7dRuns = total
 			a.Last7dPass = pass
@@ -437,6 +504,9 @@ func GetAnalytics(db *sql.DB) ([]JobAnalytics, error) {
 				}
 			}
 		}
+	}
+	if err := rows7d.Err(); err != nil {
+		return nil, fmt.Errorf("reading 7-day analytics: %w", err)
 	}
 
 	return result, nil
@@ -463,23 +533,36 @@ func GetHistory(db *sql.DB, name string, limit int) ([]HistoryEntry, error) {
 	var entries []HistoryEntry
 	for rows.Next() {
 		var e HistoryEntry
-		rows.Scan(&e.RunAt, &e.Status, &e.ExitCode, &e.Duration)
+		if err := rows.Scan(&e.RunAt, &e.Status, &e.ExitCode, &e.Duration); err != nil {
+			return nil, fmt.Errorf("scanning history: %w", err)
+		}
 		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading history: %w", err)
 	}
 	return entries, nil
 }
 
-func SetMeta(db *sql.DB, key, value string) {
-	db.Exec("INSERT INTO dispatcher_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", key, value, value)
+func SetMeta(db *sql.DB, key, value string) error {
+	if _, err := db.Exec("INSERT INTO dispatcher_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?", key, value, value); err != nil {
+		return fmt.Errorf("setting meta %s: %w", key, err)
+	}
+	return nil
 }
 
-func GetMeta(db *sql.DB, key string) string {
+// GetMeta returns the stored value for key. A missing key yields ("", nil);
+// any other failure is returned so callers can distinguish it from "unset".
+func GetMeta(db *sql.DB, key string) (string, error) {
 	var value string
 	err := db.QueryRow("SELECT value FROM dispatcher_meta WHERE key = ?", key).Scan(&value)
-	if err != nil {
-		return ""
+	if err == sql.ErrNoRows {
+		return "", nil
 	}
-	return value
+	if err != nil {
+		return "", fmt.Errorf("reading meta %s: %w", key, err)
+	}
+	return value, nil
 }
 
 func PurgeHistory(db *sql.DB, retentionDays int) (int64, error) {

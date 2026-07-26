@@ -13,8 +13,11 @@ import (
 	"github.com/blindly/dispatcher/internal/display"
 )
 
-func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir string, conn *sql.DB) {
-	absConfig, _ := filepath.Abs(configPath)
+func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir string, conn *sql.DB) error {
+	absConfig, err := filepath.Abs(configPath)
+	if err != nil {
+		return fmt.Errorf("resolving config path %s: %w", configPath, err)
+	}
 
 	// Version
 	fmt.Println("Dispatcher")
@@ -75,7 +78,10 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 		fmt.Println("  Paused:        no")
 	}
 
-	lastDispatch := db.GetMeta(conn, "last_dispatch_at")
+	lastDispatch, err := db.GetMeta(conn, "last_dispatch_at")
+	if err != nil {
+		return err
+	}
 	if lastDispatch != "" {
 		fmt.Printf("  Last dispatch: %s\n", display.FormatDt(lastDispatch))
 	} else {
@@ -164,6 +170,7 @@ func printInfo(cfg *config.DispatcherConfig, configPath, configDir, dispDir stri
 	} else {
 		fmt.Println("  Ntfy:          not configured")
 	}
+	return nil
 }
 
 func formatJobInfo(name string, job *config.JobConfig, nameWidth int) string {

@@ -1073,3 +1073,11 @@ func TestResolveScheduler_InvalidDefaults(t *testing.T) {
 		t.Errorf("ResolveScheduler(invalid) = %q, want systemd or cron", got)
 	}
 }
+
+func TestParseInterval_Overflow(t *testing.T) {
+	for _, s := range []string{"99999999999999999999s", "9223372036854775807w"} {
+		if v, err := ParseInterval(s); err == nil {
+			t.Errorf("ParseInterval(%q) = %d, want an error", s, v)
+		}
+	}
+}

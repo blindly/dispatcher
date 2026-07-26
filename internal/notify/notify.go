@@ -3,9 +3,10 @@ package notify
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -19,10 +20,30 @@ type NotifyConfig struct {
 	NtfyPriority   string
 }
 
-func SendAll(results []JobResult, cfg NotifyConfig) {
+// checkResponse drains and closes resp, returning an error when the endpoint
+// rejected the notification. Without this a 4xx/5xx from Discord or ntfy
+// (bad webhook, revoked token, rate limit) looks exactly like a success.
+func checkResponse(resp *http.Response, channel string) error {
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	detail := strings.TrimSpace(string(body))
+	if detail == "" {
+		return fmt.Errorf("%s returned HTTP %d", channel, resp.StatusCode)
+	}
+	return fmt.Errorf("%s returned HTTP %d: %s", channel, resp.StatusCode, detail)
+}
+
+// SendAll delivers summary and per-job output notifications. Delivery failures
+// are returned joined together; they never abort the remaining sends.
+func SendAll(results []JobResult, cfg NotifyConfig) error {
 	// Separate output-mode jobs from summary jobs
 	var summary []JobResult
 	var outputJobs []JobResult
+	var errs []error
 
 	for _, r := range results {
 		if r.Notify == "output" {
@@ -41,14 +62,21 @@ func SendAll(results []JobResult, cfg NotifyConfig) {
 
 	// Send summary notification for regular jobs
 	if len(summary) > 0 {
-		SendDiscordSummary(summary, cfg.DiscordWebhook)
-		SendNtfySummary(summary, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority)
+		if err := SendDiscordSummary(summary, cfg.DiscordWebhook); err != nil {
+			errs = append(errs, err)
+		}
+		if err := SendNtfySummary(summary, cfg.NtfyURL, cfg.NtfyTopic, cfg.NtfyToken, cfg.NtfyPriority); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	// Send individual output notifications
 	for _, r := range outputJobs {
-		sendOutputNotification(r, cfg)
+		if err := sendOutputNotification(r, cfg); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	return errors.Join(errs...)
 }
 
 type JobResult struct {
@@ -91,9 +119,9 @@ func extractSummary(rc int, output string) string {
 	return ""
 }
 
-func SendDiscordSummary(results []JobResult, webhookURL string) {
+func SendDiscordSummary(results []JobResult, webhookURL string) error {
 	if len(results) == 0 || webhookURL == "" {
-		return
+		return nil
 	}
 
 	passed := 0
@@ -149,22 +177,20 @@ func SendDiscordSummary(results []JobResult, webhookURL string) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Printf("  Discord notification marshal failed: %v\n", err)
-		return
+		return fmt.Errorf("building discord payload: %w", err)
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(body))
 	if err != nil {
-		fmt.Printf("  Discord notification failed: %v\n", err)
-		return
+		return fmt.Errorf("discord notification failed: %w", err)
 	}
-	resp.Body.Close()
+	return checkResponse(resp, "discord")
 }
 
-func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token string, priority string) {
+func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token string, priority string) error {
 	if len(results) == 0 || (ntfyURL == "" && topic == "") {
-		return
+		return nil
 	}
 
 	// Build the target URL
@@ -218,8 +244,7 @@ func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token st
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(body))
 	if err != nil {
-		fmt.Printf("  ntfy notification failed: %v\n", err)
-		return
+		return fmt.Errorf("building ntfy request: %w", err)
 	}
 	req.Header.Set("Title", title)
 	req.Header.Set("Priority", priority)
@@ -231,13 +256,13 @@ func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token st
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("  ntfy notification failed: %v\n", err)
-		return
+		return fmt.Errorf("ntfy notification failed: %w", err)
 	}
-	resp.Body.Close()
+	return checkResponse(resp, "ntfy")
 }
 
-func sendOutputNotification(r JobResult, cfg NotifyConfig) {
+func sendOutputNotification(r JobResult, cfg NotifyConfig) error {
+	var errs []error
 	output := strings.TrimSpace(r.Output)
 	if output == "" {
 		output = "(no output)"
@@ -271,21 +296,22 @@ func sendOutputNotification(r JobResult, cfg NotifyConfig) {
 		}
 		body, err := json.Marshal(payload)
 		if err != nil {
-			return
+			errs = append(errs, fmt.Errorf("building discord output payload for %s: %w", r.Name, err))
+		} else {
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Post(cfg.DiscordWebhook, "application/json", bytes.NewReader(body))
+			if err != nil {
+				errs = append(errs, fmt.Errorf("discord output notification for %s failed: %w", r.Name, err))
+			} else if err := checkResponse(resp, "discord"); err != nil {
+				errs = append(errs, fmt.Errorf("output notification for %s: %w", r.Name, err))
+			}
 		}
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Post(cfg.DiscordWebhook, "application/json", bytes.NewReader(body))
-		if err != nil {
-			fmt.Printf("  Discord output notification failed: %v\n", err)
-			return
-		}
-		resp.Body.Close()
 	}
 
 	// ntfy
 	ntfyURL := cfg.NtfyURL
 	if ntfyURL == "" && cfg.NtfyTopic == "" {
-		return
+		return errors.Join(errs...)
 	}
 	if ntfyURL == "" {
 		ntfyURL = "https://ntfy.sh"
@@ -296,7 +322,7 @@ func sendOutputNotification(r JobResult, cfg NotifyConfig) {
 
 	req, err := http.NewRequest("POST", ntfyURL, strings.NewReader(output))
 	if err != nil {
-		return
+		return errors.Join(append(errs, fmt.Errorf("building ntfy output request for %s: %w", r.Name, err))...)
 	}
 	req.Header.Set("Title", title)
 	if r.ExitCode != 0 {
@@ -309,10 +335,11 @@ func sendOutputNotification(r JobResult, cfg NotifyConfig) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("  ntfy output notification failed: %v\n", err)
-		return
+		errs = append(errs, fmt.Errorf("ntfy output notification for %s failed: %w", r.Name, err))
+	} else if err := checkResponse(resp, "ntfy"); err != nil {
+		errs = append(errs, fmt.Errorf("output notification for %s: %w", r.Name, err))
 	}
-	resp.Body.Close()
+	return errors.Join(errs...)
 }
 
 func SendLiveNotification(message string, jobName string, cfg NotifyConfig) error {
@@ -322,6 +349,7 @@ func SendLiveNotification(message string, jobName string, cfg NotifyConfig) erro
 	}
 
 	sent := false
+	var errs []error
 
 	// Discord
 	if cfg.DiscordWebhook != "" {
@@ -336,13 +364,16 @@ func SendLiveNotification(message string, jobName string, cfg NotifyConfig) erro
 			},
 		}
 		body, err := json.Marshal(payload)
-		if err == nil {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("building discord payload: %w", err))
+		} else {
 			client := &http.Client{Timeout: 10 * time.Second}
 			resp, err := client.Post(cfg.DiscordWebhook, "application/json", bytes.NewReader(body))
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Discord live notification failed: %v\n", err)
+				errs = append(errs, fmt.Errorf("discord live notification failed: %w", err))
+			} else if err := checkResponse(resp, "discord"); err != nil {
+				errs = append(errs, err)
 			} else {
-				resp.Body.Close()
 				sent = true
 			}
 		}
@@ -358,7 +389,9 @@ func SendLiveNotification(message string, jobName string, cfg NotifyConfig) erro
 			ntfyURL = strings.TrimRight(ntfyURL, "/") + "/" + cfg.NtfyTopic
 		}
 		req, err := http.NewRequest("POST", ntfyURL, strings.NewReader(message))
-		if err == nil {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("building ntfy request: %w", err))
+		} else {
 			req.Header.Set("Title", title)
 			req.Header.Set("Priority", "default")
 			req.Header.Set("Tags", "speech_balloon")
@@ -368,14 +401,18 @@ func SendLiveNotification(message string, jobName string, cfg NotifyConfig) erro
 			client := &http.Client{Timeout: 10 * time.Second}
 			resp, err := client.Do(req)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ntfy live notification failed: %v\n", err)
+				errs = append(errs, fmt.Errorf("ntfy live notification failed: %w", err))
+			} else if err := checkResponse(resp, "ntfy"); err != nil {
+				errs = append(errs, err)
 			} else {
-				resp.Body.Close()
 				sent = true
 			}
 		}
 	}
 
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
 	if !sent {
 		return fmt.Errorf("no notification channels configured")
 	}

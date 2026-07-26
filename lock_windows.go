@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -47,9 +48,16 @@ func acquireLock(dir string) int {
 func releaseLock(fd int, dir string) {
 	if lockFile != windows.InvalidHandle {
 		ol := new(windows.Overlapped)
-		windows.UnlockFileEx(lockFile, 0, 1, 0, ol)
-		windows.CloseHandle(lockFile)
+		if err := windows.UnlockFileEx(lockFile, 0, 1, 0, ol); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: unlocking dispatch lock: %v\n", err)
+		}
+		if err := windows.CloseHandle(lockFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: closing dispatch lock: %v\n", err)
+		}
 		lockFile = windows.InvalidHandle
 	}
-	os.Remove(filepath.Join(dir, ".dispatch.lock"))
+	lockPath := filepath.Join(dir, ".dispatch.lock")
+	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", lockPath, err)
+	}
 }

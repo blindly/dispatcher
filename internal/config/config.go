@@ -2,11 +2,13 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -162,9 +164,17 @@ func ParseInterval(s string) (int, error) {
 	if m == nil {
 		return 0, fmt.Errorf("invalid interval: %q (expected e.g. 5m, 2h, 1d)", s)
 	}
-	value, _ := strconv.Atoi(m[1])
+	// The regex allows any number of digits, so Atoi can still overflow.
+	value, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, fmt.Errorf("invalid interval: %q: %w", s, err)
+	}
 	multipliers := map[string]int{"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
-	return value * multipliers[m[2]], nil
+	mul := multipliers[m[2]]
+	if value != 0 && value > math.MaxInt/mul {
+		return 0, fmt.Errorf("invalid interval: %q is too large", s)
+	}
+	return value * mul, nil
 }
 
 // DetectScheduler checks for systemd and cron availability.
@@ -238,7 +248,9 @@ func LoadDotEnv(dir string) {
 		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
 			value = value[1 : len(value)-1]
 		}
-		os.Setenv(key, value)
+		if err := os.Setenv(key, value); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not set %s from %s: %v\n", key, envPath, err)
+		}
 	}
 }
 
@@ -350,6 +362,9 @@ func Load(path string) (*DispatcherConfig, error) {
 
 	if cfg.Timezone == "" {
 		cfg.Timezone = "America/New_York"
+	}
+	if _, err := time.LoadLocation(cfg.Timezone); err != nil {
+		return nil, fmt.Errorf("timezone %q: %w", cfg.Timezone, err)
 	}
 
 	for name, rj := range raw.Jobs {
