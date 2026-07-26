@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blindly/dispatcher/internal/config"
 	_ "modernc.org/sqlite"
 )
 
@@ -522,5 +523,157 @@ func TestMigration_PreservesData(t *testing.T) {
 	conn2.QueryRow("SELECT COUNT(*) FROM job_runs WHERE name = ?", "echo_test").Scan(&histCount)
 	if histCount != 25 {
 		t.Errorf("job_runs count = %d, want 25 (history lost during migration)", histCount)
+	}
+}
+
+func TestParseJobArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantEnv  []string
+		wantArgs []string
+	}{
+		{"empty", nil, nil, nil},
+		{"env only", []string{"FOO=bar", "BAZ=qux"}, []string{"FOO=bar", "BAZ=qux"}, nil},
+		{"bare args", []string{"one", "two"}, nil, []string{"one", "two"}},
+		{"mixed", []string{"FOO=bar", "one"}, []string{"FOO=bar"}, []string{"one"}},
+		{"after dash dash everything is an arg", []string{"FOO=bar", "--", "BAZ=qux", "one"}, []string{"FOO=bar"}, []string{"BAZ=qux", "one"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotEnv, gotArgs := parseJobArgs(tt.args)
+			if strings.Join(gotEnv, ",") != strings.Join(tt.wantEnv, ",") {
+				t.Errorf("env = %v, want %v", gotEnv, tt.wantEnv)
+			}
+			if strings.Join(gotArgs, ",") != strings.Join(tt.wantArgs, ",") {
+				t.Errorf("args = %v, want %v", gotArgs, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestValidateJob(t *testing.T) {
+	all := map[string]*config.JobConfig{
+		"base": {Name: "base", Commands: []string{"echo"}},
+	}
+
+	if issues := validateJob("base", all["base"], all); len(issues) != 0 {
+		t.Errorf("valid job reported issues: %v", issues)
+	}
+
+	empty := &config.JobConfig{Name: "empty"}
+	if issues := validateJob("empty", empty, all); len(issues) != 1 || !strings.Contains(issues[0], "empty command") {
+		t.Errorf("got %v, want an empty-command issue", issues)
+	}
+
+	missingDep := &config.JobConfig{Name: "dep", Commands: []string{"echo"}, DependsOn: "nope"}
+	if issues := validateJob("dep", missingDep, all); len(issues) != 1 || !strings.Contains(issues[0], `depends_on "nope" not found`) {
+		t.Errorf("got %v, want a missing-dependency issue", issues)
+	}
+
+	badHours := &config.JobConfig{Name: "hours", Commands: []string{"echo"}, ActiveHours: &[2]int{9, 9}}
+	if issues := validateJob("hours", badHours, all); len(issues) != 1 || !strings.Contains(issues[0], "active_hours") {
+		t.Errorf("got %v, want an active_hours issue", issues)
+	}
+
+	okHours := &config.JobConfig{Name: "hours", Commands: []string{"echo"}, ActiveHours: &[2]int{22, 2}}
+	if issues := validateJob("hours", okHours, all); len(issues) != 0 {
+		t.Errorf("wrapping active_hours should be valid, got %v", issues)
+	}
+
+	multiple := &config.JobConfig{Name: "multi", DependsOn: "nope"}
+	if issues := validateJob("multi", multiple, all); len(issues) != 2 {
+		t.Errorf("got %v, want two issues", issues)
+	}
+}
+
+func TestDetectConfig(t *testing.T) {
+	t.Run("default when nothing exists", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if got := detectConfig(); got != "Dispatcher.yaml" {
+			t.Errorf("got %q, want Dispatcher.yaml", got)
+		}
+	})
+
+	t.Run("finds lowercase variant", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "dispatcher.yml"), []byte("jobs: {}\n"), 0644)
+		t.Chdir(dir)
+		if got := detectConfig(); got != "dispatcher.yml" {
+			t.Errorf("got %q, want dispatcher.yml", got)
+		}
+	})
+
+	t.Run("prefers Dispatcher.yaml", func(t *testing.T) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "Dispatcher.yaml"), []byte("jobs: {}\n"), 0644)
+		os.WriteFile(filepath.Join(dir, "dispatcher.yml"), []byte("jobs: {}\n"), 0644)
+		t.Chdir(dir)
+		if got := detectConfig(); got != "Dispatcher.yaml" {
+			t.Errorf("got %q, want Dispatcher.yaml", got)
+		}
+	})
+}
+
+func TestEnsureDispatcherDir_Fresh(t *testing.T) {
+	dir := t.TempDir()
+
+	dispDir := ensureDispatcherDir(dir)
+
+	if dispDir != filepath.Join(dir, ".dispatcher") {
+		t.Errorf("dispDir = %q", dispDir)
+	}
+	if info, err := os.Stat(dispDir); err != nil || !info.IsDir() {
+		t.Fatalf(".dispatcher should be created: %v", err)
+	}
+}
+
+func TestEnsureDispatcherDir_MigratesLegacyLayout(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "data.db"), []byte("db"), 0644)
+	os.WriteFile(filepath.Join(dir, "data.db-wal"), []byte("wal"), 0644)
+	os.WriteFile(filepath.Join(dir, "data.db-shm"), []byte("shm"), 0644)
+	os.Mkdir(filepath.Join(dir, "logs"), 0755)
+	os.WriteFile(filepath.Join(dir, "logs", "job.log"), []byte("log"), 0644)
+	os.WriteFile(filepath.Join(dir, ".dispatch.lock"), []byte(""), 0644)
+
+	dispDir := ensureDispatcherDir(dir)
+
+	for _, name := range []string{"data.db", "data.db-wal", "data.db-shm", filepath.Join("logs", "job.log")} {
+		if _, err := os.Stat(filepath.Join(dispDir, name)); err != nil {
+			t.Errorf("%s should have moved into .dispatcher: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should no longer exist in the project root", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".dispatch.lock")); !os.IsNotExist(err) {
+		t.Error("stale lock file should be removed")
+	}
+}
+
+func TestEnsureDispatcherDir_KeepsExistingData(t *testing.T) {
+	dir := t.TempDir()
+	dispDir := filepath.Join(dir, ".dispatcher")
+	os.MkdirAll(dispDir, 0755)
+	os.WriteFile(filepath.Join(dispDir, "data.db"), []byte("new"), 0644)
+	os.WriteFile(filepath.Join(dir, "data.db"), []byte("old"), 0644)
+
+	ensureDispatcherDir(dir)
+
+	data, err := os.ReadFile(filepath.Join(dispDir, "data.db"))
+	if err != nil || string(data) != "new" {
+		t.Errorf("existing .dispatcher/data.db must not be overwritten, got %q (%v)", data, err)
+	}
+}
+
+func TestResolveSchedulerStatus_NotInstalled(t *testing.T) {
+	dir := t.TempDir()
+
+	if got := resolveSchedulerStatus("cron", dir); got != "disabled" {
+		t.Errorf("cron status = %q, want disabled for an untracked directory", got)
+	}
+	if got := resolveSchedulerStatus("systemd", dir); got == "" {
+		t.Error("systemd status should never be empty")
 	}
 }

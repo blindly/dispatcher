@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -138,5 +139,49 @@ func TestCheckPause_ManualTouch(t *testing.T) {
 	}
 	if msg == "" {
 		t.Error("should have a message")
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Minute, "30m"},
+		{90 * time.Minute, "1h"},
+		{3 * time.Hour, "3h"},
+		{48 * time.Hour, "2d"},
+		{0, "0m"},
+	}
+	for _, tt := range tests {
+		if got := FormatDuration(tt.d); got != tt.want {
+			t.Errorf("FormatDuration(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}
+
+func TestCheckPause_InvalidExpiry(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "paused"), []byte(`{"expires_at":"tomorrow"}`), 0644)
+
+	paused, msg := checkPause(dir)
+	if !paused {
+		t.Error("an unparseable expiry should keep the dispatcher paused")
+	}
+	if !strings.Contains(msg, "invalid expiry") {
+		t.Errorf("msg = %q, want it to mention the invalid expiry", msg)
+	}
+}
+
+func TestCheckPause_ManualTouchWithReason(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "paused"), []byte(`{"reason":"maintenance"}`), 0644)
+
+	paused, msg := checkPause(dir)
+	if !paused {
+		t.Fatal("should be paused")
+	}
+	if !strings.Contains(msg, "maintenance") || !strings.Contains(msg, "no expiry") {
+		t.Errorf("msg = %q, want reason and no-expiry note", msg)
 	}
 }

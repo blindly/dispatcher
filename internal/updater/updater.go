@@ -12,7 +12,8 @@ import (
 	"time"
 )
 
-const repoAPI = "https://api.github.com/repos/blindly/dispatcher/releases"
+// repoAPI is a var (not a const) so tests can point it at a stub server.
+var repoAPI = "https://api.github.com/repos/blindly/dispatcher/releases"
 
 type release struct {
 	TagName    string  `json:"tag_name"`
