@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -239,5 +240,78 @@ func TestSendLiveNotification_NoChannels(t *testing.T) {
 	err := SendLiveNotification("hello", "test", cfg)
 	if err == nil {
 		t.Error("expected error when no channels configured")
+	}
+}
+
+func TestSendDiscordSummary_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		io.WriteString(w, "unauthorized")
+	}))
+	defer server.Close()
+
+	results := []JobResult{{Name: "job1", ExitCode: 0}}
+	err := SendDiscordSummary(results, server.URL)
+	if err == nil {
+		t.Fatal("expected an error for HTTP 401")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error = %v, want it to mention the status code", err)
+	}
+}
+
+func TestSendNtfySummary_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(429)
+	}))
+	defer server.Close()
+
+	results := []JobResult{{Name: "job1", ExitCode: 0}}
+	err := SendNtfySummary(results, server.URL, "", "", "")
+	if err == nil {
+		t.Fatal("expected an error for HTTP 429")
+	}
+}
+
+func TestSendAll_ReportsEveryChannelFailure(t *testing.T) {
+	var discordHits, ntfyHits int
+	discord := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		discordHits++
+		w.WriteHeader(500)
+	}))
+	defer discord.Close()
+	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ntfyHits++
+		w.WriteHeader(500)
+	}))
+	defer ntfy.Close()
+
+	err := SendAll([]JobResult{{Name: "job1", ExitCode: 0}}, NotifyConfig{
+		DiscordWebhook: discord.URL,
+		NtfyURL:        ntfy.URL,
+	})
+	if err == nil {
+		t.Fatal("expected an error when both channels fail")
+	}
+	// A failing Discord send must not skip ntfy.
+	if discordHits != 1 || ntfyHits != 1 {
+		t.Errorf("discord hits = %d, ntfy hits = %d, want 1 each", discordHits, ntfyHits)
+	}
+	if !strings.Contains(err.Error(), "discord") || !strings.Contains(err.Error(), "ntfy") {
+		t.Errorf("error = %v, want both channels named", err)
+	}
+}
+
+func TestSendAll_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(204)
+	}))
+	defer server.Close()
+
+	if err := SendAll([]JobResult{{Name: "job1", ExitCode: 0}}, NotifyConfig{
+		DiscordWebhook: server.URL,
+		NtfyURL:        server.URL,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

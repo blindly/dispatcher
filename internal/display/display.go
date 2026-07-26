@@ -3,6 +3,7 @@ package display
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -64,9 +65,11 @@ var displayLoc *time.Location
 
 func SetTimezone(tzName string) {
 	loc, err := time.LoadLocation(tzName)
-	if err == nil {
-		displayLoc = loc
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: unknown timezone %q, showing times in UTC: %v\n", tzName, err)
+		return
 	}
+	displayLoc = loc
 }
 
 func FormatTimestamp(t time.Time) string {
@@ -131,7 +134,7 @@ func PrintPauseBanner(pauseMsg string) {
 	}
 }
 
-func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string, showAll bool, schedulerType string, schedulerStatus string) {
+func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, projectDir string, showAll bool, schedulerType string, schedulerStatus string) error {
 	now := db.NowUTC()
 
 	var totalJobs, dueCount, runningCount, failedCount int
@@ -141,8 +144,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 
 	rows, err := conn.Query("SELECT name, next_run_at, last_run_at, last_status, running_since, force_next FROM cron_jobs ORDER BY last_run_at DESC")
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return fmt.Errorf("querying jobs: %w", err)
 	}
 	defer rows.Close()
 
@@ -151,7 +153,9 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		var name, nextRun string
 		var forceNext int
 		var lr, lastStatus, runningSince sql.NullString
-		rows.Scan(&name, &nextRun, &lr, &lastStatus, &runningSince, &forceNext)
+		if err := rows.Scan(&name, &nextRun, &lr, &lastStatus, &runningSince, &forceNext); err != nil {
+			return fmt.Errorf("scanning jobs: %w", err)
+		}
 
 		job, ok := jobs[name]
 		if !ok {
@@ -188,6 +192,9 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 			}
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reading jobs: %w", err)
+	}
 
 	lastJobRunStr := "never"
 	if lastRunAt.Valid {
@@ -195,8 +202,12 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 	}
 
 	lastDispatchStr := "never"
-	if v := db.GetMeta(conn, "last_dispatch_at"); v != "" {
-		lastDispatchStr = formatTimeAgo(now, v)
+	lastDispatch, err := db.GetMeta(conn, "last_dispatch_at")
+	if err != nil {
+		return err
+	}
+	if lastDispatch != "" {
+		lastDispatchStr = formatTimeAgo(now, lastDispatch)
 	}
 
 	schedLabel := "Cron"
@@ -235,6 +246,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 	}
 	fmt.Println(statusLine)
 	fmt.Printf("%s: %s\n", schedLabel, schedulerStatus)
+	return nil
 }
 
 type jobRow struct {
@@ -249,20 +261,21 @@ type jobRow struct {
 	forceNext    int
 }
 
-func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, showAll bool) {
+func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string, showAll bool) error {
 	now := db.NowUTC()
 
 	rows, err := conn.Query("SELECT name, last_run_at, next_run_at, last_status, last_duration_s, run_count, fail_count, running_since, force_next FROM cron_jobs ORDER BY next_run_at")
 	if err != nil {
-		fmt.Printf("Error querying jobs: %v\n", err)
-		return
+		return fmt.Errorf("querying jobs: %w", err)
 	}
 	defer rows.Close()
 
 	var scheduled, adhoc []jobRow
 	for rows.Next() {
 		var r jobRow
-		rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount, &r.runningSince, &r.forceNext)
+		if err := rows.Scan(&r.name, &r.lastRun, &r.nextRun, &r.status, &r.duration, &r.runCount, &r.failCount, &r.runningSince, &r.forceNext); err != nil {
+			return fmt.Errorf("scanning jobs: %w", err)
+		}
 		job, ok := jobs[r.name]
 		if !ok {
 			continue
@@ -275,6 +288,9 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 		} else {
 			scheduled = append(scheduled, r)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reading jobs: %w", err)
 	}
 
 	if len(scheduled) > 0 {
@@ -289,6 +305,7 @@ func PrintStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string,
 		fmt.Println("\nNo jobs configured.")
 	}
 	fmt.Println()
+	return nil
 }
 
 // tableMaxName caps the name column so a single long job name doesn't
@@ -434,13 +451,12 @@ func FormatDurationHuman(d time.Duration) string {
 	return fmt.Sprintf("in %dd", int(d.Hours()/24))
 }
 
-func PrintNextRuns(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) {
+func PrintNextRuns(conn *sql.DB, jobs map[string]*config.JobConfig, tzName string) error {
 	now := db.NowUTC()
 
 	rows, err := conn.Query("SELECT name, next_run_at, last_status FROM cron_jobs ORDER BY name")
 	if err != nil {
-		fmt.Printf("Error querying jobs: %v\n", err)
-		return
+		return fmt.Errorf("querying jobs: %w", err)
 	}
 	defer rows.Close()
 
@@ -448,7 +464,9 @@ func PrintNextRuns(conn *sql.DB, jobs map[string]*config.JobConfig, tzName strin
 	for rows.Next() {
 		var name, nextRunStr string
 		var lastStatus sql.NullString
-		rows.Scan(&name, &nextRunStr, &lastStatus)
+		if err := rows.Scan(&name, &nextRunStr, &lastStatus); err != nil {
+			return fmt.Errorf("scanning jobs: %w", err)
+		}
 
 		job, ok := jobs[name]
 		if !ok {
@@ -474,10 +492,13 @@ func PrintNextRuns(conn *sql.DB, jobs map[string]*config.JobConfig, tzName strin
 			HasRun:    lastStatus.Valid,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reading jobs: %w", err)
+	}
 
 	if len(entries) == 0 {
 		fmt.Println("No scheduled jobs.")
-		return
+		return nil
 	}
 
 	// Sort by next run time
@@ -497,7 +518,11 @@ func PrintNextRuns(conn *sql.DB, jobs map[string]*config.JobConfig, tzName strin
 	fmt.Printf("%-*s  %-19s  %-10s  %s\n", nameWidth, "Job", "Next Run", "In", "Depends On")
 	fmt.Println(strings.Repeat("-", nameWidth+19+10+13))
 
-	loc, _ := time.LoadLocation(tzName)
+	loc, err := time.LoadLocation(tzName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: unknown timezone %q, showing times in UTC: %v\n", tzName, err)
+		loc = time.UTC
+	}
 	for _, e := range entries {
 		var localTime string
 		if loc != nil {
@@ -513,18 +538,18 @@ func PrintNextRuns(conn *sql.DB, jobs map[string]*config.JobConfig, tzName strin
 		fmt.Printf("%-*s  %-19s  %-10s  %s\n", nameWidth, e.Name, localTime, until, depends)
 	}
 	fmt.Println()
+	return nil
 }
 
-func PrintAnalytics(conn *sql.DB) {
+func PrintAnalytics(conn *sql.DB) error {
 	analytics, err := db.GetAnalytics(conn)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return err
 	}
 
 	if len(analytics) == 0 {
 		fmt.Println("No run history yet.")
-		return
+		return nil
 	}
 
 	fmt.Printf("\n%-30s  %6s  %6s  %6s  %7s  %10s  %10s\n",
@@ -572,18 +597,18 @@ func PrintAnalytics(conn *sql.DB) {
 		fmt.Printf("Least reliable: %s (%.1f%%)\n", worstName, worstRate)
 	}
 	fmt.Println()
+	return nil
 }
 
-func PrintHistory(conn *sql.DB, name string, limit int) {
+func PrintHistory(conn *sql.DB, name string, limit int) error {
 	entries, err := db.GetHistory(conn, name, limit)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return err
 	}
 
 	if len(entries) == 0 {
 		fmt.Printf("No history for %s\n", name)
-		return
+		return nil
 	}
 
 	fmt.Printf("\n%s — last %d runs\n", name, len(entries))
@@ -595,4 +620,5 @@ func PrintHistory(conn *sql.DB, name string, limit int) {
 		fmt.Printf("%-19s  %12s  %6d  %9.1fs\n", runAt, e.Status, e.ExitCode, e.Duration)
 	}
 	fmt.Println()
+	return nil
 }

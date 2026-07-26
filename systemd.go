@@ -158,7 +158,10 @@ func enableSystemd(cfg *config.DispatcherConfig, configDir string) {
 	}
 
 	unitDir := systemdUnitDir()
-	os.MkdirAll(unitDir, 0755)
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create unit directory %s: %v\n", unitDir, err)
+		os.Exit(1)
+	}
 
 	serviceUnit := fmt.Sprintf(`[Unit]
 Description=Dispatcher job runner (project: %s)
@@ -229,21 +232,34 @@ func disableSystemd(configDir string) {
 	unitDir := systemdUnitDir()
 	sc := systemdControlPath()
 
+	timerPath := filepath.Join(unitDir, unitName+".timer")
+	_, timerErr := os.Stat(timerPath)
+	timerInstalled := timerErr == nil
+
 	// Stop and disable the timer
 	stopCmd := append([]string{}, sc...)
 	stopCmd = append(stopCmd, "disable", "--now", unitName+".timer")
-	if err := exec.Command(stopCmd[0], stopCmd[1:]...).Run(); err != nil {
-		// Timer might not be installed, continue to cleanup
+	if err := exec.Command(stopCmd[0], stopCmd[1:]...).Run(); err != nil && timerInstalled {
+		// Only noteworthy when the unit is actually installed — otherwise
+		// systemctl is just telling us there is nothing to disable.
+		fmt.Fprintf(os.Stderr, "Warning: could not disable %s.timer: %v\n", unitName, err)
 	}
 
 	// Remove unit files
-	os.Remove(filepath.Join(unitDir, unitName+".service"))
-	os.Remove(filepath.Join(unitDir, unitName+".timer"))
+	for _, f := range []string{unitName + ".service", unitName + ".timer"} {
+		path := filepath.Join(unitDir, f)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Failed to remove %s: %v\n", path, err)
+			os.Exit(1)
+		}
+	}
 
 	// Reload daemon
 	reloadCmd := append([]string{}, sc...)
 	reloadCmd = append(reloadCmd, "daemon-reload")
-	exec.Command(reloadCmd[0], reloadCmd[1:]...).Run() // ignore error
+	if err := exec.Command(reloadCmd[0], reloadCmd[1:]...).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: daemon-reload failed: %v\n", err)
+	}
 
 	fmt.Printf("Systemd timer disabled: %s.timer\n", unitName)
 }

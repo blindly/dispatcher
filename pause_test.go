@@ -140,3 +140,29 @@ func TestCheckPause_ManualTouch(t *testing.T) {
 		t.Error("should have a message")
 	}
 }
+
+func TestWritePauseFile_UnwritableDir(t *testing.T) {
+	err := writePauseFile(filepath.Join(t.TempDir(), "missing"), time.Now(), "")
+	if err == nil {
+		t.Fatal("expected an error writing to a missing directory")
+	}
+}
+
+func TestRemovePauseFile_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	// Removing a pause file that isn't there is not an error.
+	if err := removePauseFile(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// A directory named "paused" can't be removed with os.Remove.
+	if err := os.Mkdir(filepath.Join(dir, "paused"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "paused", "child"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removePauseFile(dir); err == nil {
+		t.Error("expected an error removing a non-empty directory")
+	}
+}

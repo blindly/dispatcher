@@ -193,7 +193,10 @@ func Update(currentVersion string, targetVersion string) error {
 		tmpFile.Close()
 		return fmt.Errorf("writing update: %w", err)
 	}
-	tmpFile.Close()
+	// A close error here means the downloaded binary may be truncated on disk.
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("writing update: %w", err)
+	}
 
 	if err := os.Chmod(tmpPath, 0755); err != nil {
 		return fmt.Errorf("setting permissions: %w", err)
@@ -201,7 +204,10 @@ func Update(currentVersion string, targetVersion string) error {
 
 	// On Windows, can't overwrite a running binary — rename old one first
 	oldPath := execPath + ".old"
-	os.Remove(oldPath) // clean up any previous .old file
+	// A leftover .old file from a previous update would block the rename below.
+	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", oldPath, err)
+	}
 	if err := os.Rename(execPath, oldPath); err != nil {
 		// Not on Windows or not locked — try direct replace
 		if err := os.Rename(tmpPath, execPath); err != nil {
@@ -210,10 +216,14 @@ func Update(currentVersion string, targetVersion string) error {
 	} else {
 		if err := os.Rename(tmpPath, execPath); err != nil {
 			// Restore old binary
-			os.Rename(oldPath, execPath)
+			if rerr := os.Rename(oldPath, execPath); rerr != nil {
+				return fmt.Errorf("replacing binary: %w (rollback failed, previous binary left at %s: %v)", err, oldPath, rerr)
+			}
 			return fmt.Errorf("replacing binary: %w", err)
 		}
-		os.Remove(oldPath) // clean up
+		if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: could not remove %s: %v\n", oldPath, err)
+		}
 	}
 
 	fmt.Printf("Updated to %s\n", rel.TagName)

@@ -1,12 +1,38 @@
 package db
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/blindly/dispatcher/internal/config"
 )
+
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustDueJobs(t *testing.T, conn *sql.DB, jobs map[string]*config.JobConfig, tz string) []string {
+	t.Helper()
+	due, err := GetDueJobs(conn, jobs, tz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return due
+}
+
+func mustMeta(t *testing.T, conn *sql.DB, key string) string {
+	t.Helper()
+	v, err := GetMeta(conn, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
 
 func TestOpen_CreatesTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -38,7 +64,7 @@ func TestEnsureJobs_RegistersNew(t *testing.T) {
 		"job_a": {Name: "job_a", Commands: []string{"echo a"}, IntervalSeconds: 300},
 		"job_b": {Name: "job_b", Commands: []string{"echo b"}, IntervalSeconds: 600},
 	}
-	EnsureJobs(conn, jobs)
+	mustNoErr(t, EnsureJobs(conn, jobs))
 
 	rows, err := conn.Query("SELECT name FROM cron_jobs ORDER BY name")
 	if err != nil {
@@ -74,7 +100,7 @@ func TestGetDueJobs_ReturnsOverdue(t *testing.T) {
 		"overdue": {Name: "overdue", Commands: []string{"echo"}, IntervalSeconds: 300},
 		"future":  {Name: "future", Commands: []string{"echo"}, IntervalSeconds: 300},
 	}
-	due := GetDueJobs(conn, jobs, "America/New_York")
+	due := mustDueJobs(t, conn, jobs, "America/New_York")
 
 	found := false
 	for _, name := range due {
@@ -106,7 +132,7 @@ func TestGetDueJobs_FiltersActiveHours(t *testing.T) {
 	jobs := map[string]*config.JobConfig{
 		"narrow": {Name: "narrow", Commands: []string{"echo"}, IntervalSeconds: 300, ActiveHours: &hours},
 	}
-	due := GetDueJobs(conn, jobs, "America/New_York")
+	due := mustDueJobs(t, conn, jobs, "America/New_York")
 	for _, name := range due {
 		if name == "narrow" {
 			t.Error("narrow job should be filtered by active_hours")
@@ -167,7 +193,7 @@ func TestGetDueJobs_FiltersActiveDays(t *testing.T) {
 	jobs := map[string]*config.JobConfig{
 		"wrong_day": {Name: "wrong_day", Commands: []string{"echo"}, IntervalSeconds: 300, ActiveDays: &days},
 	}
-	due := GetDueJobs(conn, jobs, tz)
+	due := mustDueJobs(t, conn, jobs, tz)
 	for _, name := range due {
 		if name == "wrong_day" {
 			t.Error("wrong_day should be filtered by active days")
@@ -199,7 +225,7 @@ func TestGetDueJobs_HoursAndDaysCombined(t *testing.T) {
 			ActiveHours: &hours, ActiveDays: &days,
 		},
 	}
-	due := GetDueJobs(conn, jobs, tz)
+	due := mustDueJobs(t, conn, jobs, tz)
 	for _, name := range due {
 		if name == "right_day_wrong_hour" {
 			t.Error("hour filter should still apply when day matches")
@@ -218,7 +244,7 @@ func TestUpdateAfterRun(t *testing.T) {
 	now := NowUTC().Format(time.RFC3339)
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "test", now)
 
-	UpdateAfterRun(conn, "test", 300, 0, 1.5, "ok", nil)
+	mustNoErr(t, UpdateAfterRun(conn, "test", 300, 0, 1.5, "ok", nil))
 
 	var runCount int
 	var status string
@@ -251,7 +277,7 @@ func TestUpdateAfterRun_InterruptedDoesNotBumpFailCount(t *testing.T) {
 
 	// Simulate a Ctrl+C: rc=130 (SIGINT) but status="interrupted".
 	// run_count should bump, fail_count should NOT.
-	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "interrupted", nil)
+	mustNoErr(t, UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "interrupted", nil))
 
 	var runCount, failCount int
 	var status string
@@ -268,7 +294,7 @@ func TestUpdateAfterRun_InterruptedDoesNotBumpFailCount(t *testing.T) {
 	}
 
 	// Sanity check: a regular failure with the same rc still bumps fail_count.
-	UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "failed:130", nil)
+	mustNoErr(t, UpdateAfterRun(conn, "interrupt_test", 300, 130, 2.7, "failed:130", nil))
 	conn.QueryRow("SELECT fail_count FROM cron_jobs WHERE name = ?", "interrupt_test").Scan(&failCount)
 	if failCount != 1 {
 		t.Errorf("fail_count after non-interrupted failure = %d, want 1", failCount)
@@ -287,9 +313,9 @@ func TestGetAnalytics(t *testing.T) {
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "analytics_test", now)
 
 	// Simulate 3 runs: 2 pass, 1 fail
-	UpdateAfterRun(conn, "analytics_test", 300, 0, 1.0, "ok", nil)
-	UpdateAfterRun(conn, "analytics_test", 300, 0, 2.0, "ok", nil)
-	UpdateAfterRun(conn, "analytics_test", 300, 1, 3.0, "failed:1", nil)
+	mustNoErr(t, UpdateAfterRun(conn, "analytics_test", 300, 0, 1.0, "ok", nil))
+	mustNoErr(t, UpdateAfterRun(conn, "analytics_test", 300, 0, 2.0, "ok", nil))
+	mustNoErr(t, UpdateAfterRun(conn, "analytics_test", 300, 1, 3.0, "failed:1", nil))
 
 	results, err := GetAnalytics(conn)
 	if err != nil {
@@ -344,9 +370,9 @@ func TestGetHistory(t *testing.T) {
 	now := NowUTC().Format(time.RFC3339)
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "hist_test", now)
 
-	UpdateAfterRun(conn, "hist_test", 300, 0, 1.0, "ok", nil)
-	UpdateAfterRun(conn, "hist_test", 300, 1, 2.0, "failed:1", nil)
-	UpdateAfterRun(conn, "hist_test", 300, 0, 1.5, "ok", nil)
+	mustNoErr(t, UpdateAfterRun(conn, "hist_test", 300, 0, 1.0, "ok", nil))
+	mustNoErr(t, UpdateAfterRun(conn, "hist_test", 300, 1, 2.0, "failed:1", nil))
+	mustNoErr(t, UpdateAfterRun(conn, "hist_test", 300, 0, 1.5, "ok", nil))
 
 	entries, err := GetHistory(conn, "hist_test", 10)
 	if err != nil {
@@ -390,19 +416,19 @@ func TestMeta(t *testing.T) {
 	defer conn.Close()
 
 	// GetMeta returns empty string for missing key
-	if v := GetMeta(conn, "last_dispatch_at"); v != "" {
+	if v := mustMeta(t, conn, "last_dispatch_at"); v != "" {
 		t.Errorf("expected empty, got %q", v)
 	}
 
 	// SetMeta stores a value
-	SetMeta(conn, "last_dispatch_at", "2026-04-04T12:00:00Z")
-	if v := GetMeta(conn, "last_dispatch_at"); v != "2026-04-04T12:00:00Z" {
+	mustNoErr(t, SetMeta(conn, "last_dispatch_at", "2026-04-04T12:00:00Z"))
+	if v := mustMeta(t, conn, "last_dispatch_at"); v != "2026-04-04T12:00:00Z" {
 		t.Errorf("got %q, want 2026-04-04T12:00:00Z", v)
 	}
 
 	// SetMeta updates existing value
-	SetMeta(conn, "last_dispatch_at", "2026-04-04T13:00:00Z")
-	if v := GetMeta(conn, "last_dispatch_at"); v != "2026-04-04T13:00:00Z" {
+	mustNoErr(t, SetMeta(conn, "last_dispatch_at", "2026-04-04T13:00:00Z"))
+	if v := mustMeta(t, conn, "last_dispatch_at"); v != "2026-04-04T13:00:00Z" {
 		t.Errorf("got %q, want 2026-04-04T13:00:00Z", v)
 	}
 }
@@ -424,7 +450,7 @@ func TestPurgeHistory(t *testing.T) {
 		"purge_test", old, "ok", 0, 1.0)
 
 	// Insert a recent run
-	UpdateAfterRun(conn, "purge_test", 300, 0, 1.0, "ok", nil)
+	mustNoErr(t, UpdateAfterRun(conn, "purge_test", 300, 0, 1.0, "ok", nil))
 
 	// Purge older than 90 days
 	deleted, err := PurgeHistory(conn, 90)
@@ -627,7 +653,7 @@ func TestUpdateAfterRun_AtMinuteAligns(t *testing.T) {
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "aligned", now)
 
 	atMin := 30
-	UpdateAfterRun(conn, "aligned", 3600, 0, 1.5, "ok", &atMin)
+	mustNoErr(t, UpdateAfterRun(conn, "aligned", 3600, 0, 1.5, "ok", &atMin))
 
 	var nextRunStr string
 	conn.QueryRow("SELECT next_run_at FROM cron_jobs WHERE name = ?", "aligned").Scan(&nextRunStr)
@@ -826,5 +852,31 @@ func TestIsInActiveHoursAt_OvernightRange(t *testing.T) {
 	}
 	if IsInActiveHoursAt(&hours, t06, loc) {
 		t.Error("06:00 should not be in 22-6 (exclusive end)")
+	}
+}
+
+func TestQueriesReportErrors(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+
+	jobs := map[string]*config.JobConfig{"a": {Name: "a", IntervalSeconds: 60}}
+	if _, err := GetDueJobs(conn, jobs, "UTC"); err == nil {
+		t.Error("GetDueJobs should report a closed database")
+	}
+	if _, err := GetMeta(conn, "last_dispatch_at"); err == nil {
+		t.Error("GetMeta should report a closed database")
+	}
+	if err := SetMeta(conn, "last_dispatch_at", "x"); err == nil {
+		t.Error("SetMeta should report a closed database")
+	}
+	if err := EnsureJobs(conn, jobs); err == nil {
+		t.Error("EnsureJobs should report a closed database")
+	}
+	if err := UpdateAfterRun(conn, "a", 60, 0, 1.0, "ok", nil); err == nil {
+		t.Error("UpdateAfterRun should report a closed database")
 	}
 }

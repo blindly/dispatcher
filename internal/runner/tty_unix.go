@@ -115,7 +115,12 @@ func runCommandTTY(cmd *exec.Cmd, _ int) (int, string) {
 	if err != nil {
 		return -2, fmt.Sprintf("raw mode: %v", err)
 	}
-	defer func() { _ = term.Restore(stdinFd, oldState) }()
+	defer func() {
+		// A failed restore leaves the user's terminal in raw mode, so say so.
+		if err := term.Restore(stdinFd, oldState); err != nil {
+			warnf("restoring terminal mode: %v", err)
+		}
+	}()
 
 	// Bidirectional copy: parent stdin → PTY, PTY → parent stdout + capture buffer.
 	// stdin→pty in a goroutine; pty→(stdout+buffer) blocks here until the

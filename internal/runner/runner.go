@@ -26,24 +26,34 @@ func SetLogDir(dir string) {
 	logBaseDir = dir
 }
 
-func openJobLog(name string) *os.File {
+func openJobLog(name string) (*os.File, error) {
 	logDir := "logs"
 	if logBaseDir != "" {
 		logDir = filepath.Join(logBaseDir, "logs")
 	}
-	os.MkdirAll(logDir, 0755)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating log dir %s: %w", logDir, err)
+	}
 	logPath := filepath.Join(logDir, name+".log")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("opening log %s: %w", logPath, err)
 	}
-	return f
+	return f, nil
 }
 
 func writeLog(f *os.File, content string) {
-	if f != nil {
-		f.WriteString(content)
+	if f == nil {
+		return
 	}
+	if _, err := f.WriteString(content); err != nil {
+		warnf("writing to %s: %v", f.Name(), err)
+	}
+}
+
+// warnf reports a non-fatal problem that would otherwise be invisible.
+func warnf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "Warning: "+format+"\n", args...)
 }
 
 func runCommand(command string, job *config.JobConfig, timeout int, extraArgs []string, extraEnv []string, logFile *os.File, interactive bool) (int, string) {
@@ -182,15 +192,28 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	// PTY stream contains ANSI escape codes and would pollute logs.
 	var logFile *os.File
 	if !(interactive && stdinIsTTY()) {
-		logFile = openJobLog(job.Name)
-		if logFile != nil {
-			defer logFile.Close()
+		f, err := openJobLog(job.Name)
+		if err != nil {
+			warnf("job %s output will not be logged: %v", job.Name, err)
+		} else {
+			logFile = f
+			defer func() {
+				if err := logFile.Close(); err != nil {
+					warnf("closing log for %s: %v", job.Name, err)
+				}
+			}()
 		}
 		writeLog(logFile, header)
 	}
 
-	db.MarkRunning(conn, job.Name)
-	defer db.ClearRunning(conn, job.Name)
+	if err := db.MarkRunning(conn, job.Name); err != nil {
+		warnf("%v", err)
+	}
+	defer func() {
+		if err := db.ClearRunning(conn, job.Name); err != nil {
+			warnf("%v", err)
+		}
+	}()
 
 	// Handle Ctrl+C — clear running state before exit.
 	// In TTY mode the child process owns the terminal and gets SIGINT
@@ -200,7 +223,9 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		db.ClearRunning(conn, job.Name)
+		if err := db.ClearRunning(conn, job.Name); err != nil {
+			warnf("%v", err)
+		}
 		os.Exit(130)
 	}()
 	defer signal.Stop(sigCh)
@@ -235,7 +260,11 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 		status = fmt.Sprintf("ok:retry%d", attempt-1)
 	}
 
-	db.UpdateAfterRun(conn, job.Name, job.IntervalSeconds, rc, elapsed, status, job.AtMinute)
+	if err := db.UpdateAfterRun(conn, job.Name, job.IntervalSeconds, rc, elapsed, status, job.AtMinute); err != nil {
+		// The job ran, but its schedule/history were not persisted — without
+		// this warning the job would silently re-run every dispatch.
+		warnf("job %s state not saved: %v", job.Name, err)
+	}
 
 	icon := "OK"
 	if isInterrupted(rc) {
