@@ -55,19 +55,102 @@ Options:
   --config     Config file path (default: Dispatcher.yaml)
 `
 
-func detectConfig() string {
-	candidates := []string{
-		"Dispatcher.yaml",
-		"Dispatcher.yml",
-		"dispatcher.yaml",
-		"dispatcher.yml",
-	}
-	for _, c := range candidates {
+// configCandidates are the config file names probed in the working directory,
+// in priority order.
+var configCandidates = []string{
+	"Dispatcher.yaml",
+	"Dispatcher.yml",
+	"dispatcher.yaml",
+	"dispatcher.yml",
+}
+
+// existingConfig returns the first candidate config present in the working
+// directory, or "" if none exists.
+func existingConfig() string {
+	for _, c := range configCandidates {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
 	}
+	return ""
+}
+
+func detectConfig() string {
+	if c := existingConfig(); c != "" {
+		return c
+	}
 	return "Dispatcher.yaml" // default if none found
+}
+
+// fatalf prints a message to stderr and exits with status 1.
+func fatalf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
+
+// requireJob looks up a configured job, exiting with an error if it's unknown.
+func requireJob(jobs map[string]*config.JobConfig, name string) *config.JobConfig {
+	job, ok := jobs[name]
+	if !ok {
+		fatalf("Unknown job: %s", name)
+	}
+	return job
+}
+
+// requireArgs exits with the given usage line when args are missing.
+func requireArgs(args []string, n int, usageLine string) {
+	if len(args) < n {
+		fatalf("%s", usageLine)
+	}
+}
+
+// hasFlag reports whether any of the given flag spellings appear in args.
+func hasFlag(args []string, flags ...string) bool {
+	for _, a := range args {
+		for _, f := range flags {
+			if a == f {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// jobEnv builds the extra environment injected into every job subprocess.
+func jobEnv(name string, extra ...string) []string {
+	return append(extra, "DISPATCH_JOB="+name)
+}
+
+// readCrontab returns the current user's crontab. ok is false when there is
+// no crontab (or crontab is unavailable).
+func readCrontab() (content string, ok bool) {
+	out, err := exec.Command("crontab", "-l").Output()
+	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+// writeCrontab replaces the current user's crontab with content.
+func writeCrontab(content string) error {
+	cmd := exec.Command("crontab", "-")
+	cmd.Stdin = strings.NewReader(content)
+	return cmd.Run()
+}
+
+// applyScheduler installs (enable=true) or removes the configured scheduler entry.
+func applyScheduler(cfg *config.DispatcherConfig, configDir string, enable bool) {
+	systemd := cfg.EffectiveScheduler() == "systemd"
+	switch {
+	case enable && systemd:
+		enableSystemd(cfg, configDir)
+	case enable:
+		enableCron(cfg.Schedule, configDir)
+	case systemd:
+		disableSystemd(configDir)
+	default:
+		disableCron(configDir)
+	}
 }
 
 // ensureDispatcherDir creates the .dispatcher directory and migrates old files from the project root.
@@ -117,15 +200,15 @@ func ensureDispatcherDir(configDir string) string {
 
 // migrateCron updates an existing crontab entry to use the new .dispatcher/logs/ path.
 func migrateCron(projectDir string) {
-	out, err := exec.Command("crontab", "-l").Output()
-	if err != nil {
+	out, ok := readCrontab()
+	if !ok {
 		return
 	}
 
-	lines := strings.Split(string(out), "\n")
+	lines := strings.Split(out, "\n")
 	changed := false
 	for i, line := range lines {
-		if strings.Contains(line, "dispatch") && strings.Contains(line, projectDir) {
+		if isDispatchLine(line, projectDir) {
 			oldLog := ">> logs/dispatcher.log"
 			newLog := ">> .dispatcher/logs/dispatcher.log"
 			if strings.Contains(line, oldLog) && !strings.Contains(line, newLog) {
@@ -139,9 +222,7 @@ func migrateCron(projectDir string) {
 		return
 	}
 
-	cmd := exec.Command("crontab", "-")
-	cmd.Stdin = strings.NewReader(strings.Join(lines, "\n"))
-	if err := cmd.Run(); err != nil {
+	if err := writeCrontab(strings.Join(lines, "\n")); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not update crontab: %v\n", err)
 		return
 	}
@@ -150,18 +231,8 @@ func migrateCron(projectDir string) {
 
 
 func initConfig() {
-	// Check if any config already exists
-	candidates := []string{
-		"Dispatcher.yaml",
-		"Dispatcher.yml",
-		"dispatcher.yaml",
-		"dispatcher.yml",
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			fmt.Fprintf(os.Stderr, "Config already exists: %s\n", c)
-			os.Exit(1)
-		}
+	if c := existingConfig(); c != "" {
+		fatalf("Config already exists: %s", c)
 	}
 
 	defaultConfig := `timezone: America/New_York
@@ -193,8 +264,7 @@ jobs:
     # retry_delay: 5s
 `
 	if err := os.WriteFile("Dispatcher.yaml", []byte(defaultConfig), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create config: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to create config: %v", err)
 	}
 	fmt.Println("Created Dispatcher.yaml")
 }
@@ -257,8 +327,7 @@ func main() {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Config not found: %s\n", configPath)
-		os.Exit(1)
+		fatalf("Config not found: %s", configPath)
 	}
 
 	cfg, err := config.Load(configPath)
@@ -268,13 +337,7 @@ func main() {
 			notify.SendLiveNotification(
 				fmt.Sprintf("Config error in `%s`: %v", configPath, err),
 				"",
-				notify.NotifyConfig{
-					DiscordWebhook: notifyCfg.Discord.Webhook,
-					NtfyURL:        notifyCfg.Ntfy.URL,
-					NtfyTopic:      notifyCfg.Ntfy.Topic,
-					NtfyToken:      notifyCfg.Ntfy.Token,
-					NtfyPriority:   notifyCfg.Ntfy.Priority,
-				},
+				notify.FromConfig(*notifyCfg),
 			)
 		}
 		os.Exit(1)
@@ -298,29 +361,18 @@ func main() {
 			targetVersion = args[0]
 		}
 		if err := selfUpdate(targetVersion); err != nil {
-			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
-			os.Exit(1)
+			fatalf("Update failed: %v", err)
 		}
 		return
 	}
 
 	// enable/disable don't need DB
 	if cmd == "enable" {
-		sched := cfg.EffectiveScheduler()
-		if sched == "systemd" {
-			enableSystemd(cfg, configDir)
-		} else {
-			enableCron(cfg.Schedule, configDir)
-		}
+		applyScheduler(cfg, configDir, true)
 		return
 	}
 	if cmd == "disable" {
-		sched := cfg.EffectiveScheduler()
-		if sched == "systemd" {
-			disableSystemd(configDir)
-		} else {
-			disableCron(configDir)
-		}
+		applyScheduler(cfg, configDir, false)
 		return
 	}
 
@@ -341,20 +393,12 @@ func main() {
 	}
 
 	if cmd == "reload" {
-		sched := cfg.EffectiveScheduler()
-		if sched == "systemd" {
-			enableSystemd(cfg, configDir)
-		} else {
-			enableCron(cfg.Schedule, configDir)
-		}
+		applyScheduler(cfg, configDir, true)
 		return
 	}
 
 	if cmd == "notify" {
-		if len(args) == 0 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch notify [--job NAME] <message...>")
-			os.Exit(1)
-		}
+		requireArgs(args, 1, "usage: dispatch notify [--job NAME] <message...>")
 		jobName := os.Getenv("DISPATCH_JOB")
 		var msgParts []string
 		for i := 0; i < len(args); i++ {
@@ -366,26 +410,12 @@ func main() {
 			msgParts = append(msgParts, args[i])
 		}
 		if len(msgParts) == 0 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch notify [--job NAME] <message...>")
-			os.Exit(1)
+			fatalf("usage: dispatch notify [--job NAME] <message...>")
 		}
 		message := strings.Join(msgParts, " ")
 
-		notifyOn := cfg.Notify.On
-		if notifyOn == "" {
-			notifyOn = "always"
-		}
-		notifyCfg := notify.NotifyConfig{
-			On:             notifyOn,
-			DiscordWebhook: cfg.Notify.Discord.Webhook,
-			NtfyURL:        cfg.Notify.Ntfy.URL,
-			NtfyTopic:      cfg.Notify.Ntfy.Topic,
-			NtfyToken:      cfg.Notify.Ntfy.Token,
-			NtfyPriority:   cfg.Notify.Ntfy.Priority,
-		}
-		if err := notify.SendLiveNotification(message, jobName, notifyCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "notify: %v\n", err)
-			os.Exit(1)
+		if err := notify.SendLiveNotification(message, jobName, notify.FromConfig(cfg.Notify)); err != nil {
+			fatalf("notify: %v", err)
 		}
 		return
 	}
@@ -429,15 +459,9 @@ func main() {
 	}
 
 	if cmd == "logs" {
-		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch logs <job>")
-			os.Exit(1)
-		}
+		requireArgs(args, 1, "usage: dispatch logs <job>")
 		jobName := args[0]
-		if _, ok := cfg.Jobs[jobName]; !ok {
-			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", jobName)
-			os.Exit(1)
-		}
+		requireJob(cfg.Jobs, jobName)
 		logPath := filepath.Join(dispDir, "logs", jobName+".log")
 		content, err := os.ReadFile(logPath)
 		if err != nil {
@@ -445,8 +469,7 @@ func main() {
 				fmt.Printf("No logs found for %s\n", jobName)
 				return
 			}
-			fmt.Fprintf(os.Stderr, "Error reading log: %v\n", err)
-			os.Exit(1)
+			fatalf("Error reading log: %v", err)
 		}
 		// Show last 50 lines
 		lines := strings.Split(string(content), "\n")
@@ -462,10 +485,7 @@ func main() {
 		jobName := ""
 		if len(args) > 0 {
 			jobName = args[0]
-			if _, ok := cfg.Jobs[jobName]; !ok {
-				fmt.Fprintf(os.Stderr, "Unknown job: %s\n", jobName)
-				os.Exit(1)
-			}
+			requireJob(cfg.Jobs, jobName)
 		}
 		watchLogs(dispDir, jobName, cfg.Jobs)
 		return
@@ -473,18 +493,10 @@ func main() {
 
 	// run-once doesn't need DB or lock
 	if cmd == "run-once" {
-		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch run-once <job>")
-			os.Exit(1)
-		}
-		job, ok := cfg.Jobs[args[0]]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
-			os.Exit(1)
-		}
+		requireArgs(args, 1, "usage: dispatch run-once <job>")
+		job := requireJob(cfg.Jobs, args[0])
 		extraEnv, extraArgs := parseJobArgs(args[1:])
-		extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
-		rc, output := runner.RunOnceInteractive(job, extraArgs, extraEnv)
+		rc, output := runner.RunOnceInteractive(job, extraArgs, jobEnv(args[0], extraEnv...))
 		if strings.TrimSpace(output) != "" {
 			fmt.Print(output)
 		}
@@ -497,8 +509,7 @@ func main() {
 	dbPath := filepath.Join(dispDir, "data.db")
 	conn, err := db.Open(dbPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
-		os.Exit(1)
+		fatalf("Error opening database: %v", err)
 	}
 	defer conn.Close()
 
@@ -506,32 +517,15 @@ func main() {
 	display.SetTimezone(cfg.Timezone)
 	runner.SetLogDir(dispDir)
 
-	notifyOn := cfg.Notify.On
-	if notifyOn == "" {
-		notifyOn = "always"
-	}
-	notifyCfg := notify.NotifyConfig{
-		On:             notifyOn,
-		DiscordWebhook: cfg.Notify.Discord.Webhook,
-		NtfyURL:        cfg.Notify.Ntfy.URL,
-		NtfyTopic:      cfg.Notify.Ntfy.Topic,
-		NtfyToken:      cfg.Notify.Ntfy.Token,
-		NtfyPriority:   cfg.Notify.Ntfy.Priority,
-	}
+	notifyCfg := notify.FromConfig(cfg.Notify)
 
 	// Check pause state for display commands
 	_, pauseMsg := checkPause(dispDir)
 
 	// Read-only: no lock needed
 	if cmd == "list" {
-		showAll := false
-		for _, a := range args {
-			if a == "-a" || a == "--all" {
-				showAll = true
-			}
-		}
 		display.PrintPauseBanner(pauseMsg)
-		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone, showAll)
+		display.PrintStatus(conn, cfg.Jobs, cfg.Timezone, hasFlag(args, "-a", "--all"))
 		return
 	}
 
@@ -546,29 +540,17 @@ func main() {
 	}
 
 	if cmd == "history" {
-		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch history <job>")
-			os.Exit(1)
-		}
-		if _, ok := cfg.Jobs[args[0]]; !ok {
-			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
-			os.Exit(1)
-		}
+		requireArgs(args, 1, "usage: dispatch history <job>")
+		requireJob(cfg.Jobs, args[0])
 		display.PrintHistory(conn, args[0], 20)
 		return
 	}
 
 	if cmd == "status" {
-		showAll := false
-		for _, a := range args {
-			if a == "-a" || a == "--all" {
-				showAll = true
-			}
-		}
 		display.PrintPauseBanner(pauseMsg)
 		sched := cfg.EffectiveScheduler()
 		schedStatus := resolveSchedulerStatus(sched, configDir)
-		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, showAll, sched, schedStatus)
+		display.PrintQuickStatus(conn, cfg.Jobs, cfg.Timezone, configDir, hasFlag(args, "-a", "--all"), sched, schedStatus)
 		return
 	}
 
@@ -581,8 +563,7 @@ func main() {
 		now := db.NowUTC().Format(time.RFC3339)
 		rows, err := conn.Query("SELECT name FROM cron_jobs WHERE last_status LIKE 'failed%'")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			fatalf("Error: %v", err)
 		}
 		var reset []string
 		for rows.Next() {
@@ -605,14 +586,8 @@ func main() {
 	}
 
 	if cmd == "reset" {
-		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch reset <job>")
-			os.Exit(1)
-		}
-		if _, ok := cfg.Jobs[args[0]]; !ok {
-			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
-			os.Exit(1)
-		}
+		requireArgs(args, 1, "usage: dispatch reset <job>")
+		requireJob(cfg.Jobs, args[0])
 		conn.Exec("UPDATE cron_jobs SET next_run_at = ? WHERE name = ?",
 			db.NowUTC().Format(time.RFC3339), args[0])
 		fmt.Printf("Reset %s — will run on next dispatch\n", args[0])
@@ -621,19 +596,11 @@ func main() {
 
 	// dispatch run for adhoc jobs — no lock needed
 	if cmd == "run" {
-		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: dispatch run <job> [KEY=VALUE...] [-- args...]")
-			os.Exit(1)
-		}
-		job, ok := cfg.Jobs[args[0]]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Unknown job: %s\n", args[0])
-			os.Exit(1)
-		}
+		requireArgs(args, 1, "usage: dispatch run <job> [KEY=VALUE...] [-- args...]")
+		job := requireJob(cfg.Jobs, args[0])
 		if job.Adhoc {
 			extraEnv, extraArgs := parseJobArgs(args[1:])
-			extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
-			rc, _, _ := runner.RunJobInteractive(conn, job, extraArgs, extraEnv)
+			rc, _, _ := runner.RunJobInteractive(conn, job, extraArgs, jobEnv(args[0], extraEnv...))
 			if rc != 0 {
 				os.Exit(1)
 			}
@@ -657,8 +624,7 @@ func main() {
 		// Non-adhoc jobs (adhoc handled above)
 		job := cfg.Jobs[args[0]]
 		extraEnv, extraArgs := parseJobArgs(args[1:])
-		extraEnv = append(extraEnv, "DISPATCH_JOB="+args[0])
-		rc, elapsed, output := runner.RunJobInteractive(conn, job, extraArgs, extraEnv)
+		rc, elapsed, output := runner.RunJobInteractive(conn, job, extraArgs, jobEnv(args[0], extraEnv...))
 		results := []notify.JobResult{{Name: args[0], ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify}}
 		notify.SendAll(results, notifyCfg)
 		if rc != 0 {
@@ -671,8 +637,7 @@ func main() {
 			if job.Adhoc || job.Paused {
 				continue
 			}
-			jobEnv := []string{"DISPATCH_JOB=" + name}
-			rc, elapsed, output := runner.RunJobInteractive(conn, job, nil, jobEnv)
+			rc, elapsed, output := runner.RunJobInteractive(conn, job, nil, jobEnv(name))
 			results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 		}
 		notify.SendAll(results, notifyCfg)
@@ -687,8 +652,7 @@ func main() {
 		if len(args) > 0 {
 			purgeInterval, err := config.ParseInterval(args[0])
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Invalid duration: %v\n", err)
-				os.Exit(1)
+				fatalf("Invalid duration: %v", err)
 			}
 			days = purgeInterval / 86400
 			if days < 1 {
@@ -697,8 +661,7 @@ func main() {
 		}
 		deleted, err := db.PurgeHistory(conn, days)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Purge failed: %v\n", err)
-			os.Exit(1)
+			fatalf("Purge failed: %v", err)
 		}
 		fmt.Printf("Purged %d history entries older than %dd\n", deleted, days)
 
@@ -747,21 +710,11 @@ func dispatch(conn *sql.DB, cfg *config.DispatcherConfig, notifyCfg notify.Notif
 				continue
 			}
 		}
-		jobEnv := []string{"DISPATCH_JOB=" + name}
-		rc, elapsed, output := runner.RunJob(conn, job, nil, jobEnv)
+		rc, elapsed, output := runner.RunJob(conn, job, nil, jobEnv(name))
 		results = append(results, notify.JobResult{Name: name, ExitCode: rc, Elapsed: elapsed, Output: output, Notify: job.Notify})
 	}
 
-	totalTime := 0.0
-	passed, failed := 0, 0
-	for _, r := range results {
-		totalTime += r.Elapsed
-		if r.ExitCode == 0 {
-			passed++
-		} else {
-			failed++
-		}
-	}
+	passed, failed, totalTime := notify.Tally(results)
 	fmt.Printf("%s\n  Done: %d ok, %d failed, %.1fs total\n%s\n", sep, passed, failed, totalTime, sep)
 
 	notify.SendAll(results, notifyCfg)
@@ -775,20 +728,17 @@ func showDocs() {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to fetch docs: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to fetch docs: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		fmt.Fprintf(os.Stderr, "Failed to fetch docs: HTTP %d\n", resp.StatusCode)
-		os.Exit(1)
+		fatalf("Failed to fetch docs: HTTP %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read docs: %v\n", err)
-		os.Exit(1)
+		fatalf("Failed to read docs: %v", err)
 	}
 	fmt.Print(string(body))
 }
@@ -900,8 +850,7 @@ func enableCron(schedule string, projectDir string) {
 	}
 	cronLine := fmt.Sprintf("%s cd %s && %s >> .dispatcher/logs/dispatcher.log 2>&1", schedule, projectDir, dispatchPath)
 
-	out, _ := exec.Command("crontab", "-l").Output()
-	existing := string(out)
+	existing, _ := readCrontab()
 
 	newContent, status := buildCrontab(existing, cronLine, projectDir)
 
@@ -910,11 +859,8 @@ func enableCron(schedule string, projectDir string) {
 		return
 	}
 
-	cmd := exec.Command("crontab", "-")
-	cmd.Stdin = strings.NewReader(newContent)
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write crontab: %v\n", err)
-		os.Exit(1)
+	if err := writeCrontab(newContent); err != nil {
+		fatalf("Failed to write crontab: %v", err)
 	}
 
 	switch status {
@@ -949,16 +895,16 @@ func validateJob(name string, job *config.JobConfig, allJobs map[string]*config.
 }
 
 func disableCron(projectDir string) {
-	out, err := exec.Command("crontab", "-l").Output()
-	if err != nil {
+	out, ok := readCrontab()
+	if !ok {
 		fmt.Println("No crontab found")
 		return
 	}
 
-	lines := strings.Split(string(out), "\n")
+	lines := strings.Split(out, "\n")
 	var filtered []string
 	for _, line := range lines {
-		if !(strings.Contains(line, "dispatch") && strings.Contains(line, projectDir)) {
+		if !isDispatchLine(line, projectDir) {
 			filtered = append(filtered, line)
 		}
 	}
@@ -968,12 +914,8 @@ func disableCron(projectDir string) {
 		return
 	}
 
-	newCrontab := strings.Join(filtered, "\n")
-	cmd := exec.Command("crontab", "-")
-	cmd.Stdin = strings.NewReader(newCrontab)
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to update crontab: %v\n", err)
-		os.Exit(1)
+	if err := writeCrontab(strings.Join(filtered, "\n")); err != nil {
+		fatalf("Failed to update crontab: %v", err)
 	}
 	fmt.Printf("Cron disabled for %s\n", projectDir)
 }

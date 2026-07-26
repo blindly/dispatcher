@@ -76,19 +76,41 @@ func FormatTimestamp(t time.Time) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+// parseLocal parses an RFC3339 timestamp into the configured display timezone.
+func parseLocal(iso string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if displayLoc != nil {
+		t = t.In(displayLoc)
+	}
+	return t, true
+}
+
+// clipISO renders an unparseable timestamp by clipping it to n characters.
+func clipISO(iso string, n int) string {
+	if len(iso) >= n {
+		return iso[:n]
+	}
+	return iso
+}
+
+// formatElapsedShort renders a duration as seconds under a minute, else minutes.
+func formatElapsedShort(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%dm", int(d.Minutes()))
+}
+
 func FormatDt(iso string) string {
 	if iso == "" {
 		return "-"
 	}
-	t, err := time.Parse(time.RFC3339, iso)
-	if err != nil {
-		if len(iso) >= 19 {
-			return iso[:19]
-		}
-		return iso
-	}
-	if displayLoc != nil {
-		t = t.In(displayLoc)
+	t, ok := parseLocal(iso)
+	if !ok {
+		return clipISO(iso, 19)
 	}
 	return t.Format("2006-01-02 15:04")
 }
@@ -209,11 +231,7 @@ func PrintQuickStatus(conn *sql.DB, jobs map[string]*config.JobConfig, tzName st
 		runningInfo := fmt.Sprintf("%d running", runningCount)
 		if runningStart != "" {
 			if t, err := time.Parse(time.RFC3339, runningStart); err == nil {
-				ago := now.Sub(t)
-				elapsed := fmt.Sprintf("%dm", int(ago.Minutes()))
-				if ago < time.Minute {
-					elapsed = fmt.Sprintf("%ds", int(ago.Seconds()))
-				}
+				elapsed := formatElapsedShort(now.Sub(t))
 				if runningCount == 1 {
 					runningInfo = fmt.Sprintf("%s running (%s)", runningName, elapsed)
 				} else {
@@ -364,11 +382,7 @@ func shortStatus(r jobRow, job *config.JobConfig, now time.Time) string {
 		if err != nil {
 			return "running"
 		}
-		elapsed := now.Sub(t)
-		if elapsed < time.Minute {
-			return fmt.Sprintf("running %ds", int(elapsed.Seconds()))
-		}
-		return fmt.Sprintf("running %dm", int(elapsed.Minutes()))
+		return "running " + formatElapsedShort(now.Sub(t))
 	}
 	if r.status.Valid {
 		switch {
@@ -390,15 +404,9 @@ func formatTimeShort(iso string, now time.Time) string {
 	if iso == "" {
 		return "-"
 	}
-	t, err := time.Parse(time.RFC3339, iso)
-	if err != nil {
-		if len(iso) >= 16 {
-			return iso[:16]
-		}
-		return iso
-	}
-	if displayLoc != nil {
-		t = t.In(displayLoc)
+	t, ok := parseLocal(iso)
+	if !ok {
+		return clipISO(iso, 16)
 	}
 	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
 		return t.Format("15:04")

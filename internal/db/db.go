@@ -121,30 +121,19 @@ func EnsureJobs(db *sql.DB, jobs map[string]*config.JobConfig) {
 }
 
 func IsInActiveHours(hours *[2]int, tzName string) bool {
-	if hours == nil {
-		return true
-	}
 	loc, err := time.LoadLocation(tzName)
 	if err != nil {
 		return true
 	}
-	nowHour := time.Now().In(loc).Hour()
-	start, end := hours[0], hours[1]
-	if start <= end {
-		return nowHour >= start && nowHour < end
-	}
-	return nowHour >= start || nowHour < end
+	return IsInActiveHoursAt(hours, time.Now(), loc)
 }
 
 func IsOnActiveDay(days *[7]bool, tzName string) bool {
-	if days == nil {
-		return true
-	}
 	loc, err := time.LoadLocation(tzName)
 	if err != nil {
 		return true
 	}
-	return days[int(time.Now().In(loc).Weekday())]
+	return IsOnActiveDayAt(days, time.Now(), loc)
 }
 
 // computeNextAligned computes the next run time. When atMinute is nil it simply

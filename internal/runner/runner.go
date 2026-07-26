@@ -146,19 +146,17 @@ func runOnceWithLog(job *config.JobConfig, extraArgs []string, extraEnv []string
 
 	var allOutput strings.Builder
 	for _, command := range job.Commands {
+		// A command interpolating {{.CLI_ARGS}} consumes the extra args itself,
+		// so they aren't also appended to the command line.
+		args := extraArgs
 		if strings.Contains(command, "{{.CLI_ARGS}}") {
 			command = strings.ReplaceAll(command, "{{.CLI_ARGS}}", cliArgs)
-			rc, output := runCommand(command, job, timeout, nil, extraEnv, logFile, interactive)
-			allOutput.WriteString(output)
-			if rc != 0 {
-				return rc, allOutput.String()
-			}
-		} else {
-			rc, output := runCommand(command, job, timeout, extraArgs, extraEnv, logFile, interactive)
-			allOutput.WriteString(output)
-			if rc != 0 {
-				return rc, allOutput.String()
-			}
+			args = nil
+		}
+		rc, output := runCommand(command, job, timeout, args, extraEnv, logFile, interactive)
+		allOutput.WriteString(output)
+		if rc != 0 {
+			return rc, allOutput.String()
 		}
 	}
 	return 0, allOutput.String()
@@ -173,6 +171,7 @@ func RunJobInteractive(conn *sql.DB, job *config.JobConfig, extraArgs []string, 
 }
 
 func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []string, interactive bool) (int, float64, string) {
+	useTTY := interactive && stdinIsTTY()
 	now := db.NowUTC()
 	ts := display.FormatTimestamp(now)
 	header := fmt.Sprintf("[%s] START %s — %s\n", ts, job.Name, job.Description)
@@ -181,7 +180,7 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 	// Skip log capture entirely when running under a real TTY — the
 	// PTY stream contains ANSI escape codes and would pollute logs.
 	var logFile *os.File
-	if !(interactive && stdinIsTTY()) {
+	if !useTTY {
 		logFile = openJobLog(job.Name)
 		if logFile != nil {
 			defer logFile.Close()
@@ -221,7 +220,7 @@ func runJob(conn *sql.DB, job *config.JobConfig, extraArgs []string, extraEnv []
 
 	// In TTY mode, output was already streamed live to the terminal —
 	// skip the buffered print to avoid doubling.
-	if !(interactive && stdinIsTTY()) && strings.TrimSpace(output) != "" {
+	if !useTTY && strings.TrimSpace(output) != "" {
 		fmt.Println(output)
 	}
 
