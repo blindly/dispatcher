@@ -10,6 +10,11 @@ const (
 	cronUnchanged
 )
 
+// isDispatchLine reports whether a crontab line is the dispatch entry for projectDir.
+func isDispatchLine(line, projectDir string) bool {
+	return strings.Contains(line, "dispatch") && strings.Contains(line, projectDir)
+}
+
 // buildCrontab returns the new crontab content and a status describing what
 // changed. It replaces any existing dispatch line for projectDir with newLine,
 // or appends newLine if none exists.
@@ -24,7 +29,7 @@ func buildCrontab(existing, newLine, projectDir string) (string, cronStatus) {
 	firstMatch := false
 	changed := false
 	for _, line := range lines {
-		if strings.Contains(line, "dispatch") && strings.Contains(line, projectDir) {
+		if isDispatchLine(line, projectDir) {
 			if !firstMatch {
 				firstMatch = true
 				if line != newLine {

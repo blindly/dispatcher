@@ -1,13 +1,9 @@
 package notify
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 )
 
 type NotifyConfig struct {
@@ -73,20 +69,12 @@ func extractSummary(rc int, output string) string {
 			tail = tail[len(tail)-2:]
 		}
 		if len(tail) > 0 {
-			s := "```\n" + strings.Join(tail, "\n") + "\n```"
-			if len(s) > 300 {
-				s = s[:300]
-			}
-			return s
+			return truncate("```\n"+strings.Join(tail, "\n")+"\n```", 300, "")
 		}
 		return ""
 	}
 	if len(nonEmpty) > 0 {
-		s := nonEmpty[len(nonEmpty)-1]
-		if len(s) > 200 {
-			s = s[:200]
-		}
-		return s
+		return truncate(nonEmpty[len(nonEmpty)-1], 200, "")
 	}
 	return ""
 }
@@ -96,17 +84,7 @@ func SendDiscordSummary(results []JobResult, webhookURL string) {
 		return
 	}
 
-	passed := 0
-	failed := 0
-	totalTime := 0.0
-	for _, r := range results {
-		if r.ExitCode == 0 {
-			passed++
-		} else {
-			failed++
-		}
-		totalTime += r.Elapsed
-	}
+	passed, failed, totalTime := Tally(results)
 
 	var lines []string
 	for _, r := range results {
@@ -122,10 +100,7 @@ func SendDiscordSummary(results []JobResult, webhookURL string) {
 		lines = append(lines, line)
 	}
 
-	description := strings.Join(lines, "\n")
-	if len(description) > 3900 {
-		description = description[:3900] + "\n..."
-	}
+	description := truncate(strings.Join(lines, "\n"), discordMaxDescription, "\n...")
 
 	color := 0x00FF00
 	if failed > 0 && passed > 0 {
@@ -134,61 +109,18 @@ func SendDiscordSummary(results []JobResult, webhookURL string) {
 		color = 0xFF0000
 	}
 
-	title := fmt.Sprintf("Dispatcher: %d ok, %d failed (%.0fs)", passed, failed, totalTime)
-
-	payload := map[string]interface{}{
-		"embeds": []map[string]interface{}{
-			{
-				"title":       title,
-				"color":       color,
-				"description": description,
-				"timestamp":   time.Now().UTC().Format(time.RFC3339),
-			},
-		},
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		fmt.Printf("  Discord notification marshal failed: %v\n", err)
-		return
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(webhookURL, "application/json", bytes.NewReader(body))
-	if err != nil {
+	if err := postDiscordEmbed(webhookURL, summaryTitle(passed, failed, totalTime), description, color); err != nil {
 		fmt.Printf("  Discord notification failed: %v\n", err)
-		return
 	}
-	resp.Body.Close()
 }
 
 func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token string, priority string) {
-	if len(results) == 0 || (ntfyURL == "" && topic == "") {
+	url := ntfyEndpoint(ntfyURL, topic)
+	if len(results) == 0 || url == "" {
 		return
 	}
 
-	// Build the target URL
-	url := ntfyURL
-	if url == "" {
-		url = "https://ntfy.sh"
-	}
-	if topic != "" {
-		url = strings.TrimRight(url, "/") + "/" + topic
-	}
-
-	passed := 0
-	failed := 0
-	totalTime := 0.0
-	for _, r := range results {
-		if r.ExitCode == 0 {
-			passed++
-		} else {
-			failed++
-		}
-		totalTime += r.Elapsed
-	}
-
-	title := fmt.Sprintf("Dispatcher: %d ok, %d failed (%.0fs)", passed, failed, totalTime)
+	passed, failed, totalTime := Tally(results)
 
 	var lines []string
 	for _, r := range results {
@@ -216,25 +148,9 @@ func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token st
 		tags = "x"
 	}
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(body))
-	if err != nil {
+	if err := postNtfy(url, summaryTitle(passed, failed, totalTime), body, priority, tags, token); err != nil {
 		fmt.Printf("  ntfy notification failed: %v\n", err)
-		return
 	}
-	req.Header.Set("Title", title)
-	req.Header.Set("Priority", priority)
-	req.Header.Set("Tags", tags)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("  ntfy notification failed: %v\n", err)
-		return
-	}
-	resp.Body.Close()
 }
 
 func sendOutputNotification(r JobResult, cfg NotifyConfig) {
@@ -251,68 +167,30 @@ func sendOutputNotification(r JobResult, cfg NotifyConfig) {
 
 	// Discord
 	if cfg.DiscordWebhook != "" {
-		description := output
-		if len(description) > 3900 {
-			description = description[:3900] + "\n..."
-		}
+		description := truncate(output, discordMaxDescription, "\n...")
 		color := 0x4A9EFF // blue for output
 		if r.ExitCode != 0 {
 			color = 0xFF0000
 		}
-		payload := map[string]interface{}{
-			"embeds": []map[string]interface{}{
-				{
-					"title":       title,
-					"color":       color,
-					"description": "```\n" + description + "\n```",
-					"timestamp":   time.Now().UTC().Format(time.RFC3339),
-				},
-			},
-		}
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return
-		}
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Post(cfg.DiscordWebhook, "application/json", bytes.NewReader(body))
-		if err != nil {
+		if err := postDiscordEmbed(cfg.DiscordWebhook, title, "```\n"+description+"\n```", color); err != nil {
 			fmt.Printf("  Discord output notification failed: %v\n", err)
 			return
 		}
-		resp.Body.Close()
 	}
 
 	// ntfy
-	ntfyURL := cfg.NtfyURL
-	if ntfyURL == "" && cfg.NtfyTopic == "" {
-		return
-	}
+	ntfyURL := ntfyEndpoint(cfg.NtfyURL, cfg.NtfyTopic)
 	if ntfyURL == "" {
-		ntfyURL = "https://ntfy.sh"
-	}
-	if cfg.NtfyTopic != "" {
-		ntfyURL = strings.TrimRight(ntfyURL, "/") + "/" + cfg.NtfyTopic
+		return
 	}
 
-	req, err := http.NewRequest("POST", ntfyURL, strings.NewReader(output))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Title", title)
+	priority, tags := "", ""
 	if r.ExitCode != 0 {
-		req.Header.Set("Priority", "high")
-		req.Header.Set("Tags", "x")
+		priority, tags = "high", "x"
 	}
-	if cfg.NtfyToken != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.NtfyToken)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
+	if err := postNtfy(ntfyURL, title, output, priority, tags, cfg.NtfyToken); err != nil {
 		fmt.Printf("  ntfy output notification failed: %v\n", err)
-		return
 	}
-	resp.Body.Close()
 }
 
 func SendLiveNotification(message string, jobName string, cfg NotifyConfig) error {
@@ -325,54 +203,19 @@ func SendLiveNotification(message string, jobName string, cfg NotifyConfig) erro
 
 	// Discord
 	if cfg.DiscordWebhook != "" {
-		payload := map[string]interface{}{
-			"embeds": []map[string]interface{}{
-				{
-					"title":       title,
-					"color":       0x7289DA,
-					"description": message,
-					"timestamp":   time.Now().UTC().Format(time.RFC3339),
-				},
-			},
-		}
-		body, err := json.Marshal(payload)
-		if err == nil {
-			client := &http.Client{Timeout: 10 * time.Second}
-			resp, err := client.Post(cfg.DiscordWebhook, "application/json", bytes.NewReader(body))
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Discord live notification failed: %v\n", err)
-			} else {
-				resp.Body.Close()
-				sent = true
-			}
+		if err := postDiscordEmbed(cfg.DiscordWebhook, title, message, 0x7289DA); err != nil {
+			fmt.Fprintf(os.Stderr, "Discord live notification failed: %v\n", err)
+		} else {
+			sent = true
 		}
 	}
 
 	// ntfy
-	ntfyURL := cfg.NtfyURL
-	if ntfyURL == "" && cfg.NtfyTopic != "" {
-		ntfyURL = "https://ntfy.sh"
-	}
-	if ntfyURL != "" {
-		if cfg.NtfyTopic != "" {
-			ntfyURL = strings.TrimRight(ntfyURL, "/") + "/" + cfg.NtfyTopic
-		}
-		req, err := http.NewRequest("POST", ntfyURL, strings.NewReader(message))
-		if err == nil {
-			req.Header.Set("Title", title)
-			req.Header.Set("Priority", "default")
-			req.Header.Set("Tags", "speech_balloon")
-			if cfg.NtfyToken != "" {
-				req.Header.Set("Authorization", "Bearer "+cfg.NtfyToken)
-			}
-			client := &http.Client{Timeout: 10 * time.Second}
-			resp, err := client.Do(req)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "ntfy live notification failed: %v\n", err)
-			} else {
-				resp.Body.Close()
-				sent = true
-			}
+	if ntfyURL := ntfyEndpoint(cfg.NtfyURL, cfg.NtfyTopic); ntfyURL != "" {
+		if err := postNtfy(ntfyURL, title, message, "default", "speech_balloon", cfg.NtfyToken); err != nil {
+			fmt.Fprintf(os.Stderr, "ntfy live notification failed: %v\n", err)
+		} else {
+			sent = true
 		}
 	}
 

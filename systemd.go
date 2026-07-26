@@ -31,9 +31,7 @@ func cronToOnCalendar(schedule string) (string, error) {
 		return fmt.Sprintf("*-%s-* %s:%s", month, padHour(hour), padMinute(minute)), nil
 	}
 	// Format as *-*-* HH:MM where HH:MM handles */N patterns
-	hourStr := systemdHour(hour)
-	minuteStr := systemdMinute(minute)
-	return fmt.Sprintf("*-*-* %s:%s", hourStr, minuteStr), nil
+	return fmt.Sprintf("*-*-* %s:%s", systemdField(hour), systemdField(minute)), nil
 }
 
 // padHour zero-pads a fixed hour value or passes through special forms like "*/2".
@@ -41,12 +39,7 @@ func padHour(h string) string {
 	if h == "*" {
 		return "*"
 	}
-	n, err := strconv.Atoi(h)
-	if err == nil {
-		return fmt.Sprintf("%02d", n)
-	}
-	// Pass through as-is (e.g. */2)
-	return h
+	return padInt(h)
 }
 
 // padMinute zero-pads a fixed minute value or passes through special forms like "*/5".
@@ -54,53 +47,45 @@ func padMinute(m string) string {
 	if m == "*" {
 		return "0"
 	}
-	n, err := strconv.Atoi(m)
-	if err == nil {
-		return fmt.Sprintf("%02d", n)
-	}
-	// Pass through as-is (e.g. */5)
-	return m
+	return padInt(m)
 }
 
-// systemdHour formats a cron hour field for systemd.
-func systemdHour(h string) string {
-	if h == "*" {
+// systemdField formats a cron minute or hour field for systemd, expanding
+// step syntax ("*/5" → "00/5") and zero-padding fixed values.
+func systemdField(v string) string {
+	if v == "*" {
 		return "00"
 	}
-	if idx := strings.Index(h, "/"); idx >= 0 {
-		base := h[:idx]
-		step := h[idx+1:]
+	if base, step, ok := strings.Cut(v, "/"); ok {
 		if base == "*" {
 			return "00/" + step
 		}
-		return fmt.Sprintf("%s/%s", padInt(base), step)
+		return padInt(base) + "/" + step
 	}
-	return padHour(h)
+	return padInt(v)
 }
 
-// systemdMinute formats a cron minute field for systemd.
-func systemdMinute(m string) string {
-	if m == "*" {
-		return "00"
-	}
-	if idx := strings.Index(m, "/"); idx >= 0 {
-		base := m[:idx]
-		step := m[idx+1:]
-		if base == "*" {
-			return "00/" + step
-		}
-		return fmt.Sprintf("%s/%s", padInt(base), step)
-	}
-	return padMinute(m)
-}
-
-// padInt zero-pads a number string.
+// padInt zero-pads a number string, passing non-numeric input through as-is.
 func padInt(s string) string {
 	n, err := strconv.Atoi(s)
 	if err == nil {
 		return fmt.Sprintf("%02d", n)
 	}
 	return s
+}
+
+// systemctl runs a systemctl subcommand against the appropriate (user or
+// system) systemd instance.
+func systemctl(args ...string) error {
+	sc := systemdControlPath()
+	return exec.Command(sc[0], append(sc[1:], args...)...).Run()
+}
+
+// systemctlOutput runs a systemctl subcommand and returns its trimmed stdout.
+func systemctlOutput(args ...string) (string, error) {
+	sc := systemdControlPath()
+	out, err := exec.Command(sc[0], append(sc[1:], args...)...).Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // unitNameFromDir creates a safe systemd unit name from a project directory path.
@@ -199,19 +184,11 @@ WantedBy=timers.target
 		return
 	}
 
-	sc := systemdControlPath()
-
-	// Reload systemd daemon
-	reloadCmd := append([]string{}, sc...)
-	reloadCmd = append(reloadCmd, "daemon-reload")
-	if err := exec.Command(reloadCmd[0], reloadCmd[1:]...).Run(); err != nil {
+	if err := systemctl("daemon-reload"); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: daemon-reload failed: %v\n", err)
 	}
 
-	// Enable and start the timer
-	enableCmd := append([]string{}, sc...)
-	enableCmd = append(enableCmd, "enable", "--now", unitName+".timer")
-	if err := exec.Command(enableCmd[0], enableCmd[1:]...).Run(); err != nil {
+	if err := systemctl("enable", "--now", unitName+".timer"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to enable timer: %v\n", err)
 		return
 	}
@@ -227,23 +204,15 @@ WantedBy=timers.target
 func disableSystemd(configDir string) {
 	unitName := unitNameFromDir(configDir)
 	unitDir := systemdUnitDir()
-	sc := systemdControlPath()
 
-	// Stop and disable the timer
-	stopCmd := append([]string{}, sc...)
-	stopCmd = append(stopCmd, "disable", "--now", unitName+".timer")
-	if err := exec.Command(stopCmd[0], stopCmd[1:]...).Run(); err != nil {
-		// Timer might not be installed, continue to cleanup
-	}
+	// Stop and disable the timer; it might not be installed, so ignore the error
+	systemctl("disable", "--now", unitName+".timer")
 
 	// Remove unit files
 	os.Remove(filepath.Join(unitDir, unitName+".service"))
 	os.Remove(filepath.Join(unitDir, unitName+".timer"))
 
-	// Reload daemon
-	reloadCmd := append([]string{}, sc...)
-	reloadCmd = append(reloadCmd, "daemon-reload")
-	exec.Command(reloadCmd[0], reloadCmd[1:]...).Run() // ignore error
+	systemctl("daemon-reload") // ignore error
 
 	fmt.Printf("Systemd timer disabled: %s.timer\n", unitName)
 }
@@ -251,26 +220,22 @@ func disableSystemd(configDir string) {
 // isSystemdInstalled checks if a dispatch systemd timer exists for the given project directory.
 func isSystemdInstalled(configDir string) (bool, string) {
 	unitName := unitNameFromDir(configDir)
-	sc := systemdControlPath()
 
 	// Check if the timer is active
-	cmd := exec.Command(sc[0], append(sc[1:], "is-active", unitName+".timer")...)
-	out, err := cmd.Output()
+	status, err := systemctlOutput("is-active", unitName+".timer")
 	if err != nil {
 		return false, ""
 	}
-	status := strings.TrimSpace(string(out))
 	if status != "active" {
 		return false, status
 	}
 
 	// Get the OnCalendar value for display
-	cmd = exec.Command(sc[0], append(sc[1:], "show", "--property=OnCalendar", "--value", unitName+".timer")...)
-	out, err = cmd.Output()
+	out, err := systemctlOutput("show", "--property=OnCalendar", "--value", unitName+".timer")
 	if err != nil {
 		return true, status
 	}
-	onCal := strings.TrimSpace(strings.ReplaceAll(string(out), "\n", "; "))
+	onCal := strings.TrimSpace(strings.ReplaceAll(out, "\n", "; "))
 	if onCal == "" || onCal == "n/a" {
 		return true, status
 	}
