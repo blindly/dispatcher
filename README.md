@@ -68,6 +68,7 @@ timezone: America/New_York
 schedule: "*/5 * * * *"   # how often cron checks for due jobs (default: */5)
 retention: 90d              # how long to keep run history (default: 90d)
 pause_timeout: 1h           # default pause duration (default: 1h)
+update: false               # refuse `dispatch update` (default: true)
 
 vars:
   BACKUP_DIR: /var/backups/myapp
@@ -339,6 +340,7 @@ dispatch disable         # disable scheduler (remove timer or crontab entry)
 dispatch update          # self-update to latest stable release
 dispatch update beta     # update to latest beta/pre-release
 dispatch update v1.11.0  # update to a specific version
+                         # (set `update: false` in config to refuse updates)
 dispatch version         # show current version
 dispatch docs            # show full documentation
 ```

@@ -38,6 +38,30 @@ jobs:
 	return path
 }
 
+func TestUpdateAllowed(t *testing.T) {
+	dir := t.TempDir()
+
+	if !updateAllowed(filepath.Join(dir, "missing.yaml")) {
+		t.Error("missing config should allow update")
+	}
+
+	broken := filepath.Join(dir, "broken.yaml")
+	os.WriteFile(broken, []byte("jobs: [nope\n"), 0644)
+	if !updateAllowed(broken) {
+		t.Error("unparseable config should allow update")
+	}
+
+	if !updateAllowed(writeTestConfig(t, dir)) {
+		t.Error("config without 'update' key should allow update")
+	}
+
+	disabled := filepath.Join(dir, "disabled.yaml")
+	os.WriteFile(disabled, []byte("update: false\njobs:\n  j1:\n    command: echo hi\n    interval: 1h\n"), 0644)
+	if updateAllowed(disabled) {
+		t.Error("'update: false' should disable update")
+	}
+}
+
 func TestCLI_Help(t *testing.T) {
 	binary := buildBinary(t)
 	out, err := exec.Command(binary, "--help").CombinedOutput()

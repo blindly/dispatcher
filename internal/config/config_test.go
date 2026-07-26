@@ -205,6 +205,38 @@ jobs:
 	}
 }
 
+func TestLoad_AllowUpdate(t *testing.T) {
+	jobs := `
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	tests := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{"absent", jobs, true},
+		{"true", "update: true\n" + jobs, true},
+		{"false", "update: false\n" + jobs, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "dispatcher.yaml")
+			os.WriteFile(path, []byte(tt.yaml), 0644)
+
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AllowUpdate != tt.want {
+				t.Errorf("AllowUpdate = %v, want %v", cfg.AllowUpdate, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoad_CustomTimeout(t *testing.T) {
 	yaml := `
 jobs:

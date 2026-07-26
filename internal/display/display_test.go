@@ -1,10 +1,13 @@
 package display
 
 import (
+	"bytes"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/blindly/dispatcher/internal/config"
 	"github.com/blindly/dispatcher/internal/db"
@@ -145,6 +148,16 @@ func TestShortStatus(t *testing.T) {
 		t.Errorf("running long = %q", got)
 	}
 
+	runningHours := jobRow{runningSince: sql.NullString{String: now.Add(-90 * time.Minute).Format(time.RFC3339), Valid: true}}
+	if got := shortStatus(runningHours, job, now); got != "running 1h" {
+		t.Errorf("running hours = %q", got)
+	}
+
+	runningDays := jobRow{runningSince: sql.NullString{String: now.Add(-100 * time.Hour).Format(time.RFC3339), Valid: true}}
+	if got := shortStatus(runningDays, job, now); got != "running 4d" {
+		t.Errorf("running days = %q", got)
+	}
+
 	failed := jobRow{status: sql.NullString{String: "failed: exit 1", Valid: true}}
 	if got := shortStatus(failed, job, now); got != "failed" {
 		t.Errorf("failed = %q", got)
@@ -182,6 +195,100 @@ func TestFormatTimeShort(t *testing.T) {
 	got := formatTimeShort(oldDays, now)
 	if len(got) != 11 || got[2] != '-' {
 		t.Errorf("older date should be MM-DD HH:MM, got %q", got)
+	}
+}
+
+// assertGolden compares rendered table output against an expected block,
+// which catches both content and column-alignment regressions.
+func assertGolden(t *testing.T, got, want string) {
+	t.Helper()
+	if got != strings.TrimPrefix(want, "\n") {
+		t.Errorf("table mismatch\n--- got ---\n%s--- want ---\n%s", got, strings.TrimPrefix(want, "\n"))
+	}
+}
+
+func renderTable(rows []jobRow, jobs map[string]*config.JobConfig, now time.Time, adhoc bool) string {
+	var buf bytes.Buffer
+	fprintJobTable(&buf, rows, jobs, now, adhoc)
+	return buf.String()
+}
+
+func TestPrintJobTable_ShortNamesAlign(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	rows := []jobRow{{name: "a"}, {name: "b"}}
+	jobs := map[string]*config.JobConfig{
+		"a": {Name: "a", IntervalSeconds: 300},
+		"b": {Name: "b", IntervalSeconds: 604800},
+	}
+	assertGolden(t, renderTable(rows, jobs, now, false), `
+NAME  INT  LAST  NEXT  STATUS  RUN/FAIL
+a      5m  -     -     -            0/0
+b      1w  -     -     -            0/0
+`)
+}
+
+func TestPrintJobTable_AdhocAlign(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	rows := []jobRow{{name: "deploy", runCount: 3, failCount: 1}}
+	jobs := map[string]*config.JobConfig{"deploy": {Name: "deploy", Adhoc: true}}
+	assertGolden(t, renderTable(rows, jobs, now, true), `
+NAME     TYPE  LAST  STATUS  RUN/FAIL
+deploy  adhoc  -     -            3/1
+`)
+}
+
+func TestPrintJobTable_WideValuesAlign(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	rows := []jobRow{
+		{name: "job", runCount: 123456, failCount: 7890,
+			runningSince: sql.NullString{String: now.Add(-100 * time.Hour).Format(time.RFC3339), Valid: true}},
+		{name: "other"},
+	}
+	jobs := map[string]*config.JobConfig{
+		"job":   {Name: "job", IntervalSeconds: 45},
+		"other": {Name: "other", IntervalSeconds: 300},
+	}
+	assertGolden(t, renderTable(rows, jobs, now, false), `
+NAME   INT  LAST  NEXT  STATUS         RUN/FAIL
+job    45s  -     -     running 4d  123456/7890
+other   5m  -     -     -                   0/0
+`)
+}
+
+func TestPrintJobTable_UnicodeNamesAlign(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	long := "日本語のジョブ名前テストですこれはとても長い名前"
+	rows := []jobRow{{name: long}, {name: "short"}}
+	jobs := map[string]*config.JobConfig{
+		long:    {Name: long, IntervalSeconds: 300},
+		"short": {Name: "short", IntervalSeconds: 300},
+	}
+	out := renderTable(rows, jobs, now, false)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	for _, line := range lines[1:] {
+		if utf8.RuneCountInString(line) != utf8.RuneCountInString(lines[0]) {
+			t.Fatalf("row width differs from header (padding counted bytes?)\n%s", out)
+		}
+	}
+
+	name := strings.Fields(lines[1])[0]
+	if n := utf8.RuneCountInString(name); n > tableMaxName {
+		t.Errorf("name truncated to %d runes, want <= %d", n, tableMaxName)
+	}
+	if strings.ContainsRune(name, utf8.RuneError) {
+		t.Errorf("truncation split a rune: %q", name)
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	if got := truncateRunes("abc", 5); got != "abc" {
+		t.Errorf("short = %q", got)
+	}
+	if got := truncateRunes("abcdef", 4); got != "abc…" {
+		t.Errorf("long = %q", got)
+	}
+	if got := truncateRunes("日本語です", 3); got != "日本…" {
+		t.Errorf("unicode = %q", got)
 	}
 }
 
