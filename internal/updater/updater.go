@@ -1,6 +1,8 @@
 package updater
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,9 @@ import (
 )
 
 const repoAPI = "https://api.github.com/repos/blindly/dispatcher/releases"
+
+// checksumsAsset is the release asset that lists the SHA-256 of every binary.
+const checksumsAsset = "checksums.txt"
 
 type release struct {
 	TagName    string  `json:"tag_name"`
@@ -133,6 +138,71 @@ func fetchLatestBeta(apiURL string) (*release, error) {
 	return nil, fmt.Errorf("no beta releases found")
 }
 
+// parseChecksums parses the `sha256sum`-style output found in checksums.txt,
+// mapping each file's base name to its lower-case hex SHA-256 digest. Lines it
+// can't understand are skipped.
+func parseChecksums(body []byte) map[string]string {
+	out := make(map[string]string)
+	for _, line := range strings.Split(string(body), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		sum := strings.ToLower(fields[0])
+		// The filename is the last field; strip any leading "*" binary marker
+		// and any directory prefix so we match on the bare asset name.
+		name := filepath.Base(strings.TrimPrefix(fields[len(fields)-1], "*"))
+		out[name] = sum
+	}
+	return out
+}
+
+// fetchChecksums downloads and parses the release's checksums.txt asset.
+func fetchChecksums(rel *release) (map[string]string, error) {
+	var url string
+	for _, a := range rel.Assets {
+		if a.Name == checksumsAsset {
+			url = a.BrowserDownloadURL
+			break
+		}
+	}
+	if url == "" {
+		return nil, fmt.Errorf("release %s has no %s; refusing to update because the download cannot be verified", rel.TagName, checksumsAsset)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetching checksums: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("fetching checksums returned %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("reading checksums: %w", err)
+	}
+	sums := parseChecksums(body)
+	if len(sums) == 0 {
+		return nil, fmt.Errorf("%s is empty or malformed", checksumsAsset)
+	}
+	return sums, nil
+}
+
+// verifyChecksum reports an error unless the downloaded file's digest matches
+// the expected SHA-256 recorded for assetName in checksums.txt.
+func verifyChecksum(gotSum, assetName string, sums map[string]string) error {
+	want, ok := sums[assetName]
+	if !ok {
+		return fmt.Errorf("no checksum listed for %s", assetName)
+	}
+	if !strings.EqualFold(gotSum, want) {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", assetName, want, gotSum)
+	}
+	return nil
+}
+
 func Update(currentVersion string, targetVersion string) error {
 	var rel *release
 	var err error
@@ -163,6 +233,13 @@ func Update(currentVersion string, targetVersion string) error {
 		return fmt.Errorf("no binary found for %s/%s in release %s", runtime.GOOS, runtime.GOARCH, rel.TagName)
 	}
 
+	// Fetch the signed manifest of checksums before downloading the binary.
+	// We refuse to install anything we can't verify against it.
+	sums, err := fetchChecksums(rel)
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf("Updating %s -> %s ...\n", currentVersion, rel.TagName)
 
 	// Download to temp file
@@ -189,11 +266,18 @@ func Update(currentVersion string, targetVersion string) error {
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+	// Hash the bytes as they stream to disk so we can verify integrity.
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmpFile, hasher), resp.Body); err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("writing update: %w", err)
 	}
 	tmpFile.Close()
+
+	gotSum := hex.EncodeToString(hasher.Sum(nil))
+	if err := verifyChecksum(gotSum, want, sums); err != nil {
+		return fmt.Errorf("integrity check failed: %w", err)
+	}
 
 	if err := os.Chmod(tmpPath, 0755); err != nil {
 		return fmt.Errorf("setting permissions: %w", err)

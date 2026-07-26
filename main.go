@@ -73,7 +73,8 @@ func detectConfig() string {
 // ensureDispatcherDir creates the .dispatcher directory and migrates old files from the project root.
 func ensureDispatcherDir(configDir string) string {
 	dispDir := filepath.Join(configDir, ".dispatcher")
-	os.MkdirAll(dispDir, 0755)
+	// State dir can hold data.db and a .env with secrets — owner-only.
+	os.MkdirAll(dispDir, 0700)
 
 	// Migrate old data.db (and WAL/SHM files) from project root into .dispatcher/
 	oldDb := filepath.Join(configDir, "data.db")
