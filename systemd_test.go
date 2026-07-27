@@ -7,8 +7,18 @@ func TestCronToOnCalendar_Every5Minutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "*-*-* 00:00/5" {
-		t.Errorf("got %q, want *-*-* 00:00/5", got)
+	if got != "*-*-* *:00/5" {
+		t.Errorf("got %q, want *-*-* *:00/5", got)
+	}
+}
+
+func TestCronToOnCalendar_EveryMinute(t *testing.T) {
+	got, err := cronToOnCalendar("* * * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "*-*-* *:*" {
+		t.Errorf("got %q, want *-*-* *:*", got)
 	}
 }
 
@@ -17,8 +27,8 @@ func TestCronToOnCalendar_Hourly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "*-*-* 00:00" {
-		t.Errorf("got %q, want *-*-* 00:00", got)
+	if got != "*-*-* *:00" {
+		t.Errorf("got %q, want *-*-* *:00", got)
 	}
 }
 

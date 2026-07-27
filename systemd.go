@@ -52,7 +52,7 @@ func padHour(h string) string {
 // padMinute zero-pads a fixed minute value or passes through special forms like "*/5".
 func padMinute(m string) string {
 	if m == "*" {
-		return "0"
+		return "*"
 	}
 	n, err := strconv.Atoi(m)
 	if err == nil {
@@ -65,7 +65,7 @@ func padMinute(m string) string {
 // systemdHour formats a cron hour field for systemd.
 func systemdHour(h string) string {
 	if h == "*" {
-		return "00"
+		return "*"
 	}
 	if idx := strings.Index(h, "/"); idx >= 0 {
 		base := h[:idx]
@@ -81,7 +81,7 @@ func systemdHour(h string) string {
 // systemdMinute formats a cron minute field for systemd.
 func systemdMinute(m string) string {
 	if m == "*" {
-		return "00"
+		return "*"
 	}
 	if idx := strings.Index(m, "/"); idx >= 0 {
 		base := m[:idx]
