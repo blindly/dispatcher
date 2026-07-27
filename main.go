@@ -92,14 +92,21 @@ func ensureDispatcherDir(configDir string) string {
 		}
 	}
 
-	// Migrate logs directory
-	oldLogs := filepath.Join(configDir, "logs")
+	// Ensure logs directory exists (create fresh or migrate old)
 	newLogs := filepath.Join(dispDir, "logs")
+	os.MkdirAll(newLogs, 0755)
+
+	// Migrate old logs directory from project root
+	oldLogs := filepath.Join(configDir, "logs")
 	if info, err := os.Stat(oldLogs); err == nil && info.IsDir() {
-		if _, err := os.Stat(newLogs); os.IsNotExist(err) {
-			if err := os.Rename(oldLogs, newLogs); err == nil {
-				fmt.Println("Migrated logs/ → .dispatcher/logs/")
+		if entries, err := os.ReadDir(oldLogs); err == nil && len(entries) > 0 {
+			// Only migrate if old logs has content
+			for _, entry := range entries {
+				src := filepath.Join(oldLogs, entry.Name())
+				dst := filepath.Join(newLogs, entry.Name())
+				os.Rename(src, dst)
 			}
+			fmt.Println("Migrated logs/ → .dispatcher/logs/")
 		}
 	}
 
