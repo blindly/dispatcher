@@ -322,12 +322,7 @@ func main() {
 		return
 	}
 	if cmd == "disable" {
-		sched := cfg.EffectiveScheduler()
-		if sched == "systemd" {
-			disableSystemd(configDir)
-		} else {
-			disableCron(configDir)
-		}
+		disableScheduler(configDir)
 		return
 	}
 
@@ -953,6 +948,27 @@ func validateJob(name string, job *config.JobConfig, allJobs map[string]*config.
 		}
 	}
 	return issues
+}
+
+// disableScheduler removes any installed scheduler entry for this project,
+// regardless of which scheduler EffectiveScheduler() currently resolves to.
+// This handles the case where the environment changed (e.g. systemd became
+// available after a cron enable) so we don't orphan the previously-installed entry.
+func disableScheduler(configDir string) {
+	systemdInstalled, _ := isSystemdInstalled(configDir)
+	cronInstalled, _ := display.IsCronInstalled(configDir)
+
+	if !systemdInstalled && !cronInstalled {
+		fmt.Printf("No scheduled job found for %s\n", configDir)
+		return
+	}
+
+	if systemdInstalled {
+		disableSystemd(configDir)
+	}
+	if cronInstalled {
+		disableCron(configDir)
+	}
 }
 
 func disableCron(projectDir string) {

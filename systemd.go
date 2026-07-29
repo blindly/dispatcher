@@ -224,7 +224,13 @@ WantedBy=timers.target
 }
 
 // disableSystemd stops and removes the systemd timer + service.
+// If no timer is installed for this project, it reports that and returns.
 func disableSystemd(configDir string) {
+	if installed, _ := isSystemdInstalled(configDir); !installed {
+		fmt.Printf("No systemd timer found for %s\n", configDir)
+		return
+	}
+
 	unitName := unitNameFromDir(configDir)
 	unitDir := systemdUnitDir()
 	sc := systemdControlPath()
