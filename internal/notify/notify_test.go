@@ -241,3 +241,51 @@ func TestSendLiveNotification_NoChannels(t *testing.T) {
 		t.Error("expected error when no channels configured")
 	}
 }
+
+func TestSendOutputNotification_EmptyOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("should not send notification when output is empty")
+	}))
+	defer server.Close()
+
+	cfg := NotifyConfig{
+		DiscordWebhook: server.URL,
+	}
+	result := JobResult{
+		Name:     "test-job",
+		ExitCode: 0,
+		Output:   "",
+		Notify:   "output",
+	}
+	sendOutputNotification(result, cfg)
+}
+
+func TestSendOutputNotification_WithOutput(t *testing.T) {
+	var gotPayload map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotPayload)
+	}))
+	defer server.Close()
+
+	cfg := NotifyConfig{
+		DiscordWebhook: server.URL,
+	}
+	result := JobResult{
+		Name:     "test-job",
+		ExitCode: 0,
+		Output:   "some output",
+		Notify:   "output",
+	}
+	sendOutputNotification(result, cfg)
+
+	if gotPayload == nil {
+		t.Fatal("notification should be sent when output is present")
+	}
+	embeds := gotPayload["embeds"].([]interface{})
+	embed := embeds[0].(map[string]interface{})
+	description := embed["description"].(string)
+	if description != "```\nsome output\n```" {
+		t.Errorf("description = %q, want output in code block", description)
+	}
+}

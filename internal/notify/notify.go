@@ -240,7 +240,7 @@ func SendNtfySummary(results []JobResult, ntfyURL string, topic string, token st
 func sendOutputNotification(r JobResult, cfg NotifyConfig) {
 	output := strings.TrimSpace(r.Output)
 	if output == "" {
-		output = "(no output)"
+		return
 	}
 
 	icon := "ok"
