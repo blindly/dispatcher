@@ -68,6 +68,7 @@ timezone: America/New_York
 schedule: "*/5 * * * *"   # how often cron checks for due jobs (default: */5)
 retention: 90d              # how long to keep run history (default: 90d)
 pause_timeout: 1h           # default pause duration (default: 1h)
+timeout: 10m                # default job timeout (default: 10m)
 
 vars:
   BACKUP_DIR: /var/backups/myapp
@@ -139,7 +140,7 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `depends_on` | no | | Name of another job that must succeed first |
 | `retries` | no | `2` | Number of retry attempts on failure |
 | `retry_delay` | no | `5s` | Delay between retries |
-| `timeout` | no | `600s` | Max time before killing the job |
+| `timeout` | no | global `timeout` (default: `10m`) | Max time before killing the job |
 | `adhoc` | no | `false` | If true, only runs manually (skipped by scheduler) |
 | `dir` | no | | Working directory for the command |
 | `env` | no | | Environment variables (key-value map) |

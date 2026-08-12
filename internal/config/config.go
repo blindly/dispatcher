@@ -57,6 +57,7 @@ type DispatcherConfig struct {
 	Schedule     string            `yaml:"schedule"`
 	Retention    int               `yaml:"-"` // days, parsed from retention
 	PauseTimeout int              `yaml:"-"` // seconds, parsed from pause_timeout
+	Timeout      int              `yaml:"-"` // seconds, parsed from timeout
 	Vars         map[string]string `yaml:"vars"`
 }
 
@@ -110,6 +111,7 @@ type rawConfig struct {
 	Schedule       string            `yaml:"schedule"`
 	Retention      string            `yaml:"retention"`
 	PauseTimeout   string            `yaml:"pause_timeout"`
+	Timeout        string            `yaml:"timeout"`
 	DBPath         string            `yaml:"db_path"` // accepted but unused (removed, default is .dispatcher/data.db)
 	DiscordWebhook string            `yaml:"discord_webhook"`
 	Update         *bool             `yaml:"update"` // nil = enabled, false = air-gapped
@@ -332,6 +334,15 @@ func Load(path string) (*DispatcherConfig, error) {
 		pauseTimeout = pt
 	}
 
+	defaultTimeout := 600 // default 10m
+	if raw.Timeout != "" {
+		dt, err := ParseInterval(raw.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("timeout: %w", err)
+		}
+		defaultTimeout = dt
+	}
+
 	cfg := &DispatcherConfig{
 		Timezone:     raw.Timezone,
 		Notify:       raw.Notify,
@@ -340,6 +351,7 @@ func Load(path string) (*DispatcherConfig, error) {
 		Schedule:     schedule,
 		Retention:    retention,
 		PauseTimeout: pauseTimeout,
+		Timeout:      defaultTimeout,
 		AllowUpdate:  raw.Update == nil || *raw.Update,
 		Vars:         vars,
 	}
@@ -385,19 +397,7 @@ func Load(path string) (*DispatcherConfig, error) {
 			Paused:          rj.Paused,
 		}
 
-		if rj.Retries != nil {
-			job.Retries = *rj.Retries
-		}
-
-		if rj.RetryDelay != "" {
-			delay, err := ParseInterval(rj.RetryDelay)
-			if err != nil {
-				return nil, fmt.Errorf("job %q retry_delay: %w", name, err)
-			}
-			job.RetryDelay = delay
-		}
-
-		job.Timeout = 600 // default 600s
+		job.Timeout = cfg.Timeout // use global default
 
 		if rj.Timeout != "" {
 			timeout, err := ParseInterval(rj.Timeout)
@@ -405,6 +405,13 @@ func Load(path string) (*DispatcherConfig, error) {
 				return nil, fmt.Errorf("job %q timeout: %w", name, err)
 			}
 			job.Timeout = timeout
+		}
+		if rj.RetryDelay != "" {
+			delay, err := ParseInterval(rj.RetryDelay)
+			if err != nil {
+				return nil, fmt.Errorf("job %q retry_delay: %w", name, err)
+			}
+			job.RetryDelay = delay
 		}
 
 		if len(rj.ActiveHours) == 2 {

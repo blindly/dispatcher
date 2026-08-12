@@ -248,6 +248,57 @@ jobs:
 	}
 }
 
+func TestLoad_GlobalTimeout(t *testing.T) {
+	yaml := `
+timeout: 5m
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Timeout != 300 {
+		t.Errorf("global timeout = %d, want 300", cfg.Timeout)
+	}
+	job := cfg.Jobs["j1"]
+	if job.Timeout != 300 {
+		t.Errorf("job timeout = %d, want 300 (inherited from global)", job.Timeout)
+	}
+}
+
+func TestLoad_GlobalTimeoutOverride(t *testing.T) {
+	yaml := `
+timeout: 5m
+jobs:
+  j1:
+    command: echo hi
+    interval: 1h
+    timeout: 2m
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Timeout != 300 {
+		t.Errorf("global timeout = %d, want 300", cfg.Timeout)
+	}
+	job := cfg.Jobs["j1"]
+	if job.Timeout != 120 {
+		t.Errorf("job timeout = %d, want 120 (override)", job.Timeout)
+	}
+}
+
 func TestLoad_AdhocDefaultFalse(t *testing.T) {
 	yaml := `
 jobs:
