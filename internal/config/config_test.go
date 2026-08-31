@@ -123,7 +123,7 @@ jobs:
 	if job.IntervalSeconds != 300 {
 		t.Errorf("interval = %d, want 300", job.IntervalSeconds)
 	}
-	if job.ActiveHours == nil || job.ActiveHours[0] != 9 || job.ActiveHours[1] != 17 {
+	if job.ActiveHours == nil || job.ActiveHours[0] != 540 || job.ActiveHours[1] != 1020 {
 		t.Errorf("active_hours = %v", job.ActiveHours)
 	}
 	dep := cfg.Jobs["dependent_job"]
@@ -1122,5 +1122,83 @@ func TestResolveScheduler_InvalidDefaults(t *testing.T) {
 	got := ResolveScheduler("invalid")
 	if got != "systemd" && got != "cron" {
 		t.Errorf("ResolveScheduler(invalid) = %q, want systemd or cron", got)
+	}
+}
+
+func TestLoad_ActiveHoursMinuteStrings(t *testing.T) {
+	yaml := `
+timezone: UTC
+jobs:
+  j1:
+    command: echo hi
+    interval: 1m
+    active_hours: ["9:31", 16]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["j1"]
+	if job.ActiveHours == nil || job.ActiveHours[0] != 571 || job.ActiveHours[1] != 960 {
+		t.Errorf("active_hours = %v, want [571 960]", job.ActiveHours)
+	}
+}
+
+func TestLoad_ActiveHoursBothMinuteStrings(t *testing.T) {
+	yaml := `
+timezone: UTC
+jobs:
+  j1:
+    command: echo hi
+    interval: 1m
+    active_hours: ["9:31", "16:00"]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := cfg.Jobs["j1"]
+	if job.ActiveHours == nil || job.ActiveHours[0] != 571 || job.ActiveHours[1] != 960 {
+		t.Errorf("active_hours = %v, want [571 960]", job.ActiveHours)
+	}
+}
+
+func TestLoad_ActiveHoursInvalidMinutePart(t *testing.T) {
+	yaml := `
+timezone: UTC
+jobs:
+  j1:
+    command: echo hi
+    interval: 1m
+    active_hours: ["9:99", 16]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+	if _, err := Load(path); err == nil {
+		t.Error("expected error for active_hours minute 99")
+	}
+}
+
+func TestLoad_ActiveHoursInvalidHourPart(t *testing.T) {
+	yaml := `
+timezone: UTC
+jobs:
+  j1:
+    command: echo hi
+    interval: 1m
+    active_hours: ["25:00", 16]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dispatcher.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+	if _, err := Load(path); err == nil {
+		t.Error("expected error for active_hours hour 25")
 	}
 }

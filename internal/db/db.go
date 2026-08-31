@@ -128,12 +128,14 @@ func IsInActiveHours(hours *[2]int, tzName string) bool {
 	if err != nil {
 		return true
 	}
-	nowHour := time.Now().In(loc).Hour()
+	// ActiveHours are minutes since midnight ([start, end); end 1440 = midnight).
+	lt := time.Now().In(loc)
+	nowMin := lt.Hour()*60 + lt.Minute()
 	start, end := hours[0], hours[1]
 	if start <= end {
-		return nowHour >= start && nowHour < end
+		return nowMin >= start && nowMin < end
 	}
-	return nowHour >= start || nowHour < end
+	return nowMin >= start || nowMin < end
 }
 
 func IsOnActiveDay(days *[7]bool, tzName string) bool {
@@ -257,18 +259,19 @@ func ComputeNextRun(job *config.JobConfig, nextRunStr string, tzName string) tim
 		if !IsInActiveHoursAt(job.ActiveHours, candidate, loc) {
 			// If before active window, jump to start of window
 			localT := candidate.In(loc)
-			startHour := job.ActiveHours[0]
+			startMin := job.ActiveHours[0]
+			localMin := localT.Hour()*60 + localT.Minute()
 			// Check for overnight wrap: if end <= start and we're past end, jump to start of next day's window
-			if job.ActiveHours[1] <= job.ActiveHours[0] && localT.Hour() >= job.ActiveHours[1] && localT.Hour() < job.ActiveHours[0] {
+			if job.ActiveHours[1] <= job.ActiveHours[0] && localMin >= job.ActiveHours[1] && localMin < job.ActiveHours[0] {
 				// We're in the gap between end and start of a wrapping window — jump to start
-				jump := time.Date(localT.Year(), localT.Month(), localT.Day(), startHour, 0, 0, 0, loc)
+				jump := time.Date(localT.Year(), localT.Month(), localT.Day(), startMin/60, startMin%60, 0, 0, loc)
 				if !jump.After(candidate) {
 					jump = jump.AddDate(0, 0, 1)
 				}
 				candidate = jump.UTC()
 				continue
 			}
-			jump := time.Date(localT.Year(), localT.Month(), localT.Day(), startHour, 0, 0, 0, loc)
+			jump := time.Date(localT.Year(), localT.Month(), localT.Day(), startMin/60, startMin%60, 0, 0, loc)
 			if !jump.After(candidate) {
 				jump = jump.AddDate(0, 0, 1)
 			}
@@ -299,17 +302,18 @@ func IsInActiveHoursAt(hours *[2]int, t time.Time, loc *time.Location) bool {
 	if hours == nil {
 		return true
 	}
-	var hour int
+	var minOf int
 	if loc != nil {
-		hour = t.In(loc).Hour()
+		lt := t.In(loc)
+		minOf = lt.Hour()*60 + lt.Minute()
 	} else {
-		hour = t.Hour()
+		minOf = t.Hour()*60 + t.Minute()
 	}
 	start, end := hours[0], hours[1]
 	if start <= end {
-		return hour >= start && hour < end
+		return minOf >= start && minOf < end
 	}
-	return hour >= start || hour < end
+	return minOf >= start || minOf < end
 }
 
 func GetDueJobs(db *sql.DB, jobs map[string]*config.JobConfig, tzName string) []string {

@@ -102,7 +102,7 @@ func TestGetDueJobs_FiltersActiveHours(t *testing.T) {
 	conn.Exec("INSERT INTO cron_jobs (name, next_run_at) VALUES (?, ?)", "narrow", past)
 
 	// active_hours 3-4 AM — almost certainly not the current hour
-	hours := [2]int{3, 4}
+	hours := [2]int{180, 240}
 	jobs := map[string]*config.JobConfig{
 		"narrow": {Name: "narrow", Commands: []string{"echo"}, IntervalSeconds: 300, ActiveHours: &hours},
 	}
@@ -190,8 +190,8 @@ func TestGetDueJobs_HoursAndDaysCombined(t *testing.T) {
 	loc, _ := time.LoadLocation(tz)
 	today := int(time.Now().In(loc).Weekday())
 	var days [7]bool
-	days[today] = true               // day matches
-	hours := [2]int{3, 4}            // hour almost certainly does not
+	days[today] = true        // day matches
+	hours := [2]int{180, 240} // hour almost certainly does not
 
 	jobs := map[string]*config.JobConfig{
 		"right_day_wrong_hour": {
@@ -672,7 +672,7 @@ func TestComputeNextRun_EmptyNextRun(t *testing.T) {
 }
 
 func TestComputeNextRun_ActiveHoursWithinWindow(t *testing.T) {
-	hours := [2]int{9, 17}
+	hours := [2]int{540, 1020}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// Use tomorrow at 10:00 UTC — within the 9-17 UTC window
 	tomorrow := NowUTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
@@ -685,7 +685,7 @@ func TestComputeNextRun_ActiveHoursWithinWindow(t *testing.T) {
 }
 
 func TestComputeNextRun_ActiveHoursBeforeWindow(t *testing.T) {
-	hours := [2]int{9, 17}
+	hours := [2]int{540, 1020}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// Tomorrow 08:00 UTC is before the 9-17 window — should jump to 09:00
 	tomorrow := NowUTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
@@ -698,7 +698,7 @@ func TestComputeNextRun_ActiveHoursBeforeWindow(t *testing.T) {
 }
 
 func TestComputeNextRun_ActiveHoursAfterWindow(t *testing.T) {
-	hours := [2]int{9, 17}
+	hours := [2]int{540, 1020}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// Tomorrow 18:00 UTC is after the 9-17 window — should jump to next day 09:00
 	tomorrow := NowUTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
@@ -711,7 +711,7 @@ func TestComputeNextRun_ActiveHoursAfterWindow(t *testing.T) {
 }
 
 func TestComputeNextRun_ActiveHoursOvernight(t *testing.T) {
-	hours := [2]int{22, 6}
+	hours := [2]int{1320, 360}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// Tomorrow 03:00 UTC is within the 22-6 overnight window
 	tomorrow := NowUTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
@@ -723,7 +723,7 @@ func TestComputeNextRun_ActiveHoursOvernight(t *testing.T) {
 }
 
 func TestComputeNextRun_ActiveHoursOvernightGap(t *testing.T) {
-	hours := [2]int{22, 6}
+	hours := [2]int{1320, 360}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
 	// Tomorrow 12:00 UTC is in the gap — should jump to 22:00 same day
 	tomorrow := NowUTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
@@ -755,7 +755,7 @@ func TestComputeNextRun_ActiveDaysFilter(t *testing.T) {
 }
 
 func TestComputeNextRun_ActiveDaysAndHoursCombined(t *testing.T) {
-	hours := [2]int{9, 17}
+	hours := [2]int{540, 1020}
 	weekdays := [7]bool{false, true, true, true, true, true, false}
 	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours, ActiveDays: &weekdays}
 	// Find next Friday at 18:00 — after hours on a weekday, should jump to Monday 09:00
@@ -766,7 +766,7 @@ func TestComputeNextRun_ActiveDaysAndHoursCombined(t *testing.T) {
 	}
 	friday := now.Add(time.Duration(daysUntilFri) * 24 * time.Hour).Truncate(24 * time.Hour)
 	nextRun := friday.Add(18 * time.Hour)
-	want := friday.Add(3 * 24*time.Hour + 9*time.Hour) // Monday 09:00
+	want := friday.Add(3*24*time.Hour + 9*time.Hour) // Monday 09:00
 	result := ComputeNextRun(job, nextRun.Format(time.RFC3339), "UTC")
 	if !result.Equal(want) {
 		t.Errorf("got %s, want %s", result, want)
@@ -789,7 +789,7 @@ func TestIsInActiveHoursAt_Nil(t *testing.T) {
 
 func TestIsInActiveHoursAt_NormalRange(t *testing.T) {
 	loc, _ := time.LoadLocation("UTC")
-	hours := [2]int{9, 17}
+	hours := [2]int{540, 1020}
 	t09 := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
 	t12 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	t17 := time.Date(2026, 1, 1, 17, 0, 0, 0, time.UTC)
@@ -810,7 +810,7 @@ func TestIsInActiveHoursAt_NormalRange(t *testing.T) {
 
 func TestIsInActiveHoursAt_OvernightRange(t *testing.T) {
 	loc, _ := time.LoadLocation("UTC")
-	hours := [2]int{22, 6}
+	hours := [2]int{1320, 360}
 	t22 := time.Date(2026, 1, 1, 22, 0, 0, 0, time.UTC)
 	t03 := time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC)
 	t10 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
@@ -826,5 +826,52 @@ func TestIsInActiveHoursAt_OvernightRange(t *testing.T) {
 	}
 	if IsInActiveHoursAt(&hours, t06, loc) {
 		t.Error("06:00 should not be in 22-6 (exclusive end)")
+	}
+}
+
+func TestIsInActiveHoursAt_MinuteBoundary(t *testing.T) {
+	loc, _ := time.LoadLocation("UTC")
+	hours := [2]int{571, 960} // 09:31–16:00
+	before := time.Date(2026, 1, 1, 9, 30, 59, 0, time.UTC)
+	first := time.Date(2026, 1, 1, 9, 31, 0, 0, time.UTC)
+	last := time.Date(2026, 1, 1, 15, 59, 59, 0, time.UTC)
+	after := time.Date(2026, 1, 1, 16, 0, 0, 0, time.UTC)
+	if IsInActiveHoursAt(&hours, before, loc) {
+		t.Error("9:30:59 should be before a 9:31 window start")
+	}
+	if !IsInActiveHoursAt(&hours, first, loc) {
+		t.Error("9:31:00 should be in a 9:31–16:00 window")
+	}
+	if !IsInActiveHoursAt(&hours, last, loc) {
+		t.Error("15:59:59 should be in a 9:31–16:00 window")
+	}
+	if IsInActiveHoursAt(&hours, after, loc) {
+		t.Error("16:00:00 should be outside a 9:31–16:00 window (exclusive end)")
+	}
+}
+
+func TestComputeNextRun_ActiveHoursMinuteStartJump(t *testing.T) {
+	hours := [2]int{571, 960} // 09:31–16:00
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 60, ActiveHours: &hours}
+	// Tomorrow 08:00 UTC is before the 9:31 window start — should jump to 09:31
+	tomorrow := NowUTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
+	nextRun := tomorrow.Add(8 * time.Hour)
+	want := tomorrow.Add(571 * time.Minute)
+	result := ComputeNextRun(job, nextRun.Format(time.RFC3339), "UTC")
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
+	}
+}
+
+func TestComputeNextRun_ActiveHoursOvernightGapMinutes(t *testing.T) {
+	hours := [2]int{1350, 360} // 22:30–06:00
+	job := &config.JobConfig{Name: "test", Commands: []string{"echo"}, IntervalSeconds: 3600, ActiveHours: &hours}
+	// Tomorrow 12:00 UTC is in the gap — should jump to 22:30 same day
+	tomorrow := NowUTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
+	nextRun := tomorrow.Add(12 * time.Hour)
+	want := tomorrow.Add(1350 * time.Minute)
+	result := ComputeNextRun(job, nextRun.Format(time.RFC3339), "UTC")
+	if !result.Equal(want) {
+		t.Errorf("got %s, want %s", result, want)
 	}
 }

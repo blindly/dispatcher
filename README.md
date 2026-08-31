@@ -134,7 +134,7 @@ dispatch run restore -- /var/backups/myapp/dump-20260315.sql.gz
 | `command` | yes | | Shell command or list of commands |
 | `interval` | yes* | | Run frequency: `30s`, `5m`, `2h`, `1d`, `1w` |
 | `description` | no | | Shown in logs and notifications |
-| `active_hours` | no | | `[start, end]` hours when the job is allowed to run |
+| `active_hours` | no | | `[start, end]` hours (ints) or `["HH:MM", ...]` times when the job is allowed to run |
 | `at_minute` | no | | Minute (0–59) to run at; prevents schedule drift from execution time |
 | `days` | no | | Days of week: `weekdays`, `weekends`, `all`, or list like `[mon, wed, fri]` |
 | `depends_on` | no | | Name of another job that must succeed first |
@@ -191,6 +191,22 @@ jobs:
     interval: 24h
     at_minute: 30          # runs at 00:30 each day, regardless of runtime
 ```
+
+
+### Time windows with `active_hours`
+
+`active_hours` gates the hours when a job is allowed to run. Plain integers are hours (`[9, 17]` = 09:00–17:00); strings with a colon are clock times (`["9:31", 17]` = 09:31–17:00), so a job can start partway into an hour:
+
+```yaml
+jobs:
+  exit-checks:
+    command: ./check-exits.sh
+    interval: 1m
+    active_hours: ["9:31", 16]   # 9:31am–4:00pm only
+    days: weekdays
+```
+
+The end is exclusive: `17` and `"17:00"` both mean "until 17:00". Overnight windows wrap (`[22, 6]` = 22:00–06:00). Out-of-window dispatches skip the job; the first tick inside the window runs it.
 
 Environment variables in the form `${VAR_NAME}` are expanded throughout the config. Variables are loaded from `.dispatcher/.env` first, then from a `.env` in the config directory (project root), then from the shell environment. Use this for secrets like webhook URLs:
 

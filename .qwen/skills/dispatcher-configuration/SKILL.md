@@ -46,7 +46,7 @@ jobs:
 | `retries` | 2 | Retry attempts on failure |
 | `retry_delay` | 5s | Delay between retries |
 | `depends_on` | | Job that must succeed first |
-| `active_hours` | | `[start, end]` hours when allowed to run |
+| `active_hours` | | `[start, end]` hours (ints) or `["HH:MM"]` times when allowed to run; end exclusive, wraps overnight |
 | `at_minute` | | Minute (0-59) to anchor schedule (prevents drift) |
 | `days` | | Days: `weekdays`, `weekends`, `all`, or `[mon, wed, fri]` |
 | `adhoc` | false | If true, only runs manually |
@@ -159,6 +159,9 @@ jobs:
     at_minute: 0  # runs at :00, :15, :30, :45
 ```
 
+
+**Caveat:** with `interval: 1m` the derived set is every minute, so `at_minute` cannot gate anything — it only zero-pads seconds. To start at a specific minute use `active_hours: ["HH:MM", ...]` instead, or wrap the command.
+
 ## Dependencies
 
 Jobs wait for dependency to succeed:
@@ -254,6 +257,18 @@ jobs:
     interval: 30m
     active_hours: [9, 17]  # 9am-5pm only
     days: weekdays
+```
+
+Minute-level starts: strings with a colon shift the window start inside the hour:
+
+```yaml
+jobs:
+  exit-checks:
+    command: ./check-exits.sh
+    interval: 1m
+    active_hours: ["9:31", 16]  # 9:31am-4:00pm only
+    days: weekdays
+```
 ```
 
 ## Config File Locations

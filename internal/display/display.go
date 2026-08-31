@@ -37,7 +37,7 @@ func formatActive(days *[7]bool, hours *[2]int) string {
 		}
 	}
 	if hours != nil {
-		parts = append(parts, fmt.Sprintf("%02d-%02d", hours[0], hours[1]))
+		parts = append(parts, fmt.Sprintf("%02d:%02d-%02d:%02d", hours[0]/60, hours[0]%60, hours[1]/60, hours[1]%60))
 	}
 	if len(parts) == 0 {
 		return "always"
@@ -408,13 +408,13 @@ func formatTimeShort(iso string, now time.Time) string {
 
 // NextRunEntry holds computed next-run info for display.
 type NextRunEntry struct {
-	Name        string
-	NextRun     time.Time
-	Until       time.Duration
-	DependsOn   string
-	IsAdhoc     bool
-	IsPaused    bool
-	HasRun      bool // whether the job has ever run
+	Name      string
+	NextRun   time.Time
+	Until     time.Duration
+	DependsOn string
+	IsAdhoc   bool
+	IsPaused  bool
+	HasRun    bool // whether the job has ever run
 }
 
 // FormatDurationHuman returns a human-readable relative time string (e.g., "in 5m", "in 2h", "in 3d").

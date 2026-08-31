@@ -13,20 +13,20 @@ import (
 
 type JobConfig struct {
 	Name            string
-	Commands        []string          // one or more commands to run in sequence
+	Commands        []string // one or more commands to run in sequence
 	IntervalSeconds int
-	Description     string            `yaml:"description"`
-	ActiveHours     *[2]int           `yaml:"-"`
-	ActiveDays      *[7]bool          `yaml:"-"` // indexed by time.Weekday: Sun=0..Sat=6; nil = every day
-	AtMinute        *int              `yaml:"-"`  // nil = no alignment; anchor minute (0-59), valid minutes derived from interval
-	DependsOn       string            `yaml:"depends_on"`
-	Retries         int               `yaml:"retries"`
-	RetryDelay      int               `yaml:"-"` // seconds, parsed from retry_delay
-	Timeout         int               `yaml:"-"` // seconds, parsed from timeout
+	Description     string   `yaml:"description"`
+	ActiveHours     *[2]int  `yaml:"-"`
+	ActiveDays      *[7]bool `yaml:"-"` // indexed by time.Weekday: Sun=0..Sat=6; nil = every day
+	AtMinute        *int     `yaml:"-"` // nil = no alignment; anchor minute (0-59), valid minutes derived from interval
+	DependsOn       string   `yaml:"depends_on"`
+	Retries         int      `yaml:"retries"`
+	RetryDelay      int      `yaml:"-"` // seconds, parsed from retry_delay
+	Timeout         int      `yaml:"-"` // seconds, parsed from timeout
 	Adhoc           bool
 	Dir             string            `yaml:"dir"`
 	Env             map[string]string `yaml:"env"`
-	Shell           string            `yaml:"shell"` // default: /bin/bash (Unix) or powershell (Windows)
+	Shell           string            `yaml:"shell"`  // default: /bin/bash (Unix) or powershell (Windows)
 	Notify          string            `yaml:"notify"` // "always", "failure", or "" (inherit global)
 	Paused          bool              `yaml:"paused"`
 }
@@ -49,15 +49,15 @@ type NotifyConfig struct {
 }
 
 type DispatcherConfig struct {
-	Timezone     string            `yaml:"timezone"`
-	Notify       NotifyConfig      `yaml:"notify"`
+	Timezone     string       `yaml:"timezone"`
+	Notify       NotifyConfig `yaml:"notify"`
 	Jobs         map[string]*JobConfig
-	AllowUpdate  bool              `yaml:"-"` // false = air-gapped, update disabled
+	AllowUpdate  bool              `yaml:"-"`         // false = air-gapped, update disabled
 	Scheduler    string            `yaml:"scheduler"` // "systemd", "cron", or "" (auto)
 	Schedule     string            `yaml:"schedule"`
 	Retention    int               `yaml:"-"` // days, parsed from retention
-	PauseTimeout int              `yaml:"-"` // seconds, parsed from pause_timeout
-	Timeout      int              `yaml:"-"` // seconds, parsed from timeout
+	PauseTimeout int               `yaml:"-"` // seconds, parsed from pause_timeout
+	Timeout      int               `yaml:"-"` // seconds, parsed from timeout
 	Vars         map[string]string `yaml:"vars"`
 }
 
@@ -82,12 +82,73 @@ func (s *stringOrList) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// hourMinuteList handles active_hours entries that are either plain integers
+// (hours: 9 → 09:00) or "HH:MM" time-of-day strings ("9:31" → 09:31). Parsed
+// values are minutes since midnight, so [9, "16:30"] means 09:00–16:30.
+type hourMinuteList []int
+
+func (h *hourMinuteList) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		m, err := parseHourMinuteNode(value)
+		if err != nil {
+			return err
+		}
+		*h = hourMinuteList{m}
+		return nil
+	}
+	var nodes []yaml.Node
+	if err := value.Decode(&nodes); err != nil {
+		return err
+	}
+	out := make(hourMinuteList, 0, len(nodes))
+	for i := range nodes {
+		m, err := parseHourMinuteNode(&nodes[i])
+		if err != nil {
+			return err
+		}
+		out = append(out, m)
+	}
+	*h = out
+	return nil
+}
+
+// parseHourMinuteNode converts an hour int ("9" → 540, back-compat, no range
+// check here — validateJob owns semantic checks) or an "HH:MM" string
+// ("16:00" → 960) to minutes since midnight. 24:00 (1440) is allowed as an
+// exclusive midnight end.
+func parseHourMinuteNode(node *yaml.Node) (int, error) {
+	v := strings.TrimSpace(node.Value)
+	if node.Tag == "!!int" {
+		h, err := strconv.Atoi(v)
+		if err != nil {
+			return 0, fmt.Errorf("active_hours: invalid hour %q", v)
+		}
+		return h * 60, nil
+	}
+	if node.Tag != "!!str" {
+		return 0, fmt.Errorf("active_hours: unsupported value %q (want hour int or \"HH:MM\")", v)
+	}
+	if !strings.Contains(v, ":") {
+		return parseHourMinuteNode(&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: v})
+	}
+	parts := strings.SplitN(v, ":", 2)
+	hh, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	mm, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil {
+		return 0, fmt.Errorf("active_hours: invalid time %q (want \"HH:MM\" or hour int)", v)
+	}
+	if hh < 0 || hh > 24 || mm < 0 || mm > 59 || (hh == 24 && mm != 0) {
+		return 0, fmt.Errorf("active_hours: time %q out of range (HH 0-24, MM 0-59; 24 only as 24:00)", v)
+	}
+	return hh*60 + mm, nil
+}
+
 // rawJob is the intermediate YAML structure before parsing.
 type rawJob struct {
 	Command     stringOrList      `yaml:"command"`
 	Interval    string            `yaml:"interval"`
 	Description string            `yaml:"description"`
-	ActiveHours []int             `yaml:"active_hours"`
+	ActiveHours hourMinuteList    `yaml:"active_hours"`
 	AtMinute    *int              `yaml:"at_minute"`
 	Days        stringOrList      `yaml:"days"`
 	DependsOn   string            `yaml:"depends_on"`
@@ -415,9 +476,8 @@ func Load(path string) (*DispatcherConfig, error) {
 		}
 
 		if len(rj.ActiveHours) == 2 {
-			job.ActiveHours = &[2]int{rj.ActiveHours[0], rj.ActiveHours[1]}
+			job.ActiveHours = &[2]int{rj.ActiveHours[0], rj.ActiveHours[1]} // minutes since midnight; int entries are hours for back-compat
 		}
-
 		if rj.AtMinute != nil {
 			minute := *rj.AtMinute
 			if minute < 0 || minute > 59 {

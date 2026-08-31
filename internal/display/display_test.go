@@ -73,9 +73,9 @@ func TestFormatActive_Default(t *testing.T) {
 }
 
 func TestFormatActive_HoursOnly(t *testing.T) {
-	hours := [2]int{9, 17}
-	if got := formatActive(nil, &hours); got != "09-17" {
-		t.Errorf("got %q, want 09-17", got)
+	hours := [2]int{540, 1020}
+	if got := formatActive(nil, &hours); got != "09:00-17:00" {
+		t.Errorf("got %q, want 09:00-17:00", got)
 	}
 }
 
@@ -102,9 +102,9 @@ func TestFormatActive_ArbitraryDays(t *testing.T) {
 
 func TestFormatActive_Combined(t *testing.T) {
 	days := [7]bool{false, true, true, true, true, true, false}
-	hours := [2]int{9, 17}
-	if got := formatActive(&days, &hours); got != "M-F 09-17" {
-		t.Errorf("got %q, want M-F 09-17", got)
+	hours := [2]int{540, 1020}
+	if got := formatActive(&days, &hours); got != "M-F 09:00-17:00" {
+		t.Errorf("got %q, want M-F 09:00-17:00", got)
 	}
 }
 

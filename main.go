@@ -155,7 +155,6 @@ func migrateCron(projectDir string) {
 	fmt.Println("Migrated crontab: logs/ → .dispatcher/logs/")
 }
 
-
 func initConfig() {
 	// Check if any config already exists
 	candidates := []string{
@@ -943,8 +942,8 @@ func validateJob(name string, job *config.JobConfig, allJobs map[string]*config.
 	}
 	if job.ActiveHours != nil {
 		start, end := job.ActiveHours[0], job.ActiveHours[1]
-		if start < 0 || start > 23 || end < 0 || end > 24 || start == end {
-			issues = append(issues, fmt.Sprintf("%s: active_hours must be 0-23 start with end strictly greater, or wrapping (e.g. [22, 2]); 24 means midnight", name))
+		if start < 0 || start > 1439 || end < 0 || end > 1440 || start == end {
+			issues = append(issues, fmt.Sprintf("%s: active_hours entries must be hour ints or \"HH:MM\"; start 00:00-23:59, end up to 24:00 (midnight), end != start", name))
 		}
 	}
 	return issues
