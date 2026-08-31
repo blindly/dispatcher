@@ -19,7 +19,7 @@ import (
 	"github.com/blindly/dispatcher/internal/updater"
 )
 
-var version = "v1.14.8-beta.5"
+var version = "v1.14.9-beta.1"
 
 const usage = `Usage: dispatch [command] [options]
 
