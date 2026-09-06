@@ -31,9 +31,11 @@ func openJobLog(name string) *os.File {
 	if logBaseDir != "" {
 		logDir = filepath.Join(logBaseDir, "logs")
 	}
-	os.MkdirAll(logDir, 0755)
+	os.MkdirAll(logDir, 0700)
 	logPath := filepath.Join(logDir, name+".log")
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Logs capture job stdout/stderr, which can contain secrets — keep them
+	// readable only by the owner.
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil
 	}

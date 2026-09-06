@@ -98,6 +98,74 @@ func TestFetchLatestStable_SkipsMislabeledBetas(t *testing.T) {
 	}
 }
 
+func TestParseChecksums(t *testing.T) {
+	body := []byte("abc123  dispatch-linux-amd64\n" +
+		"DEF456 *dispatch-windows-amd64.exe\n" +
+		"789aaa  dist/dispatch-darwin-arm64\n" +
+		"malformed-line\n\n")
+	sums := parseChecksums(body)
+	cases := map[string]string{
+		"dispatch-linux-amd64":       "abc123",
+		"dispatch-windows-amd64.exe": "def456", // lower-cased
+		"dispatch-darwin-arm64":      "789aaa", // dir prefix stripped
+	}
+	for name, want := range cases {
+		if got := sums[name]; got != want {
+			t.Errorf("sums[%q] = %q, want %q", name, got, want)
+		}
+	}
+	if _, ok := sums["malformed-line"]; ok {
+		t.Error("malformed line should be skipped")
+	}
+}
+
+func TestVerifyChecksum(t *testing.T) {
+	sums := map[string]string{"dispatch-linux-amd64": "abc123"}
+
+	if err := verifyChecksum("abc123", "dispatch-linux-amd64", sums); err != nil {
+		t.Errorf("matching checksum should pass: %v", err)
+	}
+	// Digests are compared case-insensitively.
+	if err := verifyChecksum("ABC123", "dispatch-linux-amd64", sums); err != nil {
+		t.Errorf("case-insensitive match should pass: %v", err)
+	}
+	if err := verifyChecksum("deadbeef", "dispatch-linux-amd64", sums); err == nil {
+		t.Error("mismatched checksum should fail")
+	}
+	if err := verifyChecksum("abc123", "dispatch-unknown", sums); err == nil {
+		t.Error("missing asset should fail")
+	}
+}
+
+func TestFetchChecksums_MissingAsset(t *testing.T) {
+	rel := &release{
+		TagName: "v1.0.0",
+		Assets:  []asset{{Name: assetName(), BrowserDownloadURL: "https://example.com/bin"}},
+	}
+	if _, err := fetchChecksums(rel); err == nil {
+		t.Error("expected error when release has no checksums.txt")
+	}
+}
+
+func TestFetchChecksums_Downloads(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("abc123  " + assetName() + "\n"))
+	}))
+	defer server.Close()
+
+	rel := &release{
+		TagName: "v1.0.0",
+		Assets:  []asset{{Name: checksumsAsset, BrowserDownloadURL: server.URL}},
+	}
+	sums, err := fetchChecksums(rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sums[assetName()] != "abc123" {
+		t.Errorf("got %q, want abc123", sums[assetName()])
+	}
+}
+
 func TestFetchLatestBeta_NoBetas(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		releases := []release{
