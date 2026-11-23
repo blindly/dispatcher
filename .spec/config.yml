@@ -1,0 +1,38 @@
+version: 1
+
+# Repo-level overrides. Global defaults live in ~/.config/spec/config.yml —
+# any key here wins over the same key there.
+
+# Agent (opt-in; none = no subprocess ever runs)
+# agent: claude        # claude | devin | gemini | codex | aider | opencode | amp | cline | vibe
+# agent_cmd: mycli --flag {prompt}   # {prompt} = prompt arg; {prompt-file} = temp file; absent = stdin
+# agent_env: [LANG, API_TOKEN=deploy_token]  # empty inherits the environment
+# agent_timeout: 3600   # seconds
+
+# Web
+# web_host: 127.0.0.1   # use 0.0.0.0 to expose on all interfaces
+# web_port: 8080
+
+# Lifecycle
+# statuses: [draft, proposed, accepted, implemented, deprecated, rejected]
+# done_statuses: [deprecated, rejected]   # no longer valid: hidden on the board by default (implemented specs stay visible)
+# idea_statuses: [new, refined, discarded]   # lifecycle for inbox ideas
+
+# Verification — run by spec verify and after spec apply (no shell; quotes group args)
+# verify: [go test ./..., spec validate, spec check]
+
+# Editor for spec edit / spec config edit (falls back to $EDITOR, then vi)
+# editor: vim
+
+# Persona — a shared development role from ~/.config/spec/personas/<name>.md,
+# used in agent prompts when the repo has no .spec/role.md (which always wins)
+# persona: senior-go   # see: spec persona
+
+# Skills — library skills (~/.config/spec/skills/<name>/) enabled for this
+# repo; repo-owned skills under .spec/skills/ need no entry here
+# skills: [review]             # see: spec skill
+# skill_targets: [.devin/skills, .claude/skills]   # install dirs (default: the configured agent's dir, else both)
+
+# Viewer for spec view (default: built-in plain output; no $PAGER)
+# viewer: "glow --style dark {file}"   # {file} = path; absent = appended
+skills: [dispatcher-configuration]

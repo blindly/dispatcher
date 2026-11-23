@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	_ "embed"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,9 @@ import (
 )
 
 var version = "v1.14.9-beta.1"
+
+//go:embed SKILL.md
+var skillMD string
 
 const usage = `Usage: dispatch [command] [options]
 
@@ -50,6 +54,8 @@ Commands:
   update       Self-update to latest release (or 'update beta')
   version      Show current version
   docs         Show full documentation
+  skill        Print the agent skill file (SKILL.md) to stdout
+               (--install writes it to detected agent skill dirs)
 
 Options:
   --config     Config file path (default: Dispatcher.yaml)
@@ -257,6 +263,17 @@ func main() {
 		return
 	}
 
+	if cmd == "skill" {
+		for _, a := range args {
+			if a == "--install" || a == "-i" {
+				installSkill()
+				return
+			}
+		}
+		fmt.Print(skillMD)
+		return
+	}
+
 	if cmd == "init" {
 		initConfig()
 		return
@@ -307,6 +324,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
 			os.Exit(1)
 		}
+		refreshSkills()
 		return
 	}
 

@@ -19,4 +19,17 @@ jobs:
     command: echo "World"
     interval: 10m
     description: Depends on hello
-    depends_on: hello
+
+  check-reboot:
+    command: |
+      needs-restarting
+      rc=$?
+      if [ $rc -eq 1 ]; then
+        echo "REBOOT_NEEDED"
+      else
+        echo "NO_REBOOT_NEEDED"
+      fi
+      exit 0
+    interval: 1h
+    description: Check if system reboot is required
+    notify: output

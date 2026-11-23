@@ -358,6 +358,8 @@ dispatch update beta     # update to latest beta/pre-release
 dispatch update v1.11.0  # update to a specific version
 dispatch version         # show current version
 dispatch docs            # show full documentation
+dispatch skill           # print the agent skill file (SKILL.md) to stdout
+dispatch skill --install # install it to ~/.config/spec/skills, ~/.claude/skills, ~/.config/devin/skills
 ```
 
 ## Scheduling
